@@ -21,7 +21,8 @@ export default function Visualizer() {
     songs: storeSongs,
     playTrack,
     activePlaylistId,
-    dominantColor
+    dominantColor,
+    goBackView
   } = usePlayerStore(useShallow(state => ({
     activeTrack: state.activeTrack,
     activeView: state.activeView,
@@ -31,7 +32,8 @@ export default function Visualizer() {
     songs: state.songs,
     playTrack: state.playTrack,
     activePlaylistId: state.activePlaylistId,
-    dominantColor: state.dominantColor
+    dominantColor: state.dominantColor,
+    goBackView: state.goBackView
   })));
 
   const [discClicks, setDiscClicks] = useState(0);
@@ -40,7 +42,7 @@ export default function Visualizer() {
 
   // Handle Close
   const handleClose = () => {
-    setActiveView('music');
+    goBackView();
     setTimeout(() => setDiscClicks(0), 700); // reset after fade out
   };
 
@@ -57,7 +59,7 @@ export default function Visualizer() {
   // Derive tracks to display on the right (up to 5)
   let upcomingTracks = [];
   if (queue && queue.length > 0) {
-    const queueActiveIndex = queue.findIndex(t => t.id === activeTrack?.id);
+    const queueActiveIndex = queue.findIndex(t => (t.id || t.videoId) === (activeTrack?.id || activeTrack?.videoId));
     if (queue.length <= 5) {
       upcomingTracks = [...queue];
     } else {
@@ -76,7 +78,7 @@ export default function Visualizer() {
   // Formatting artist and title for big text
   const artistName = String(activeTrack?.artist || "UNKNOWN ARTIST");
   const title = String(activeTrack?.title || "NO TRACK");
-  const trackIndex = ((queue || []).findIndex(t => t.id === activeTrack?.id) + 1).toString().padStart(2, '0');
+  const trackIndex = ((queue || []).findIndex(t => (t.id || t.videoId) === (activeTrack?.id || activeTrack?.videoId)) + 1).toString().padStart(2, '0');
 
   // Hardcode genres or extract if possible (usually not available in simple metadata, using placeholder matching aesthetic)
   const genresText = "PSYCHEDELIC POP, ROCK, DISCO, SYNTH-POP";
@@ -169,11 +171,18 @@ export default function Visualizer() {
         <div className="flex-1 flex flex-col justify-center max-w-xl 2xl:max-w-2xl ml-16 mt-10">
           
           {/* Massive Artist Text */}
-          <div className="flex flex-col mb-4">
-            <h1 className="text-[7.5vw] 2xl:text-[8rem] font-black tracking-tighter text-[#111] uppercase leading-[0.85] break-words">
-              {artistName.split(' ').map((word, i) => (
-                <span key={i} className="block">{word}</span>
-              ))}
+          <div className="flex flex-col mb-4 max-h-[40vh] overflow-hidden">
+            <h1 
+              className="font-black tracking-tighter text-[#111] uppercase leading-[0.9] break-words transition-all duration-300"
+              style={{
+                fontSize: artistName.length > 35 
+                  ? 'clamp(2rem, 3.5vw, 4rem)' 
+                  : artistName.length > 20 
+                    ? 'clamp(3rem, 5.5vw, 6rem)' 
+                    : 'clamp(4.5rem, 7.5vw, 8rem)'
+              }}
+            >
+              {artistName}
             </h1>
           </div>
 
@@ -190,22 +199,25 @@ export default function Visualizer() {
           {/* Track List */}
           <div className="flex flex-col gap-5 pl-2">
             {upcomingTracks.map((track) => {
-              let tIndex = queue?.findIndex(t => t.id === track.id);
+              const trackIdentifier = track.id || track.videoId;
+              let tIndex = queue?.findIndex(t => (t.id || t.videoId) === trackIdentifier);
               if (tIndex === -1 || tIndex === undefined) tIndex = upcomingTracks.indexOf(track);
               const actualIndex = (tIndex + 1).toString().padStart(2, '0');
-              const isPlayingThis = isPlaying && activeTrack?.id === track.id;
+              const isPlayingThis = isPlaying && (activeTrack?.id || activeTrack?.videoId) === trackIdentifier;
+              
+              const imgUrl = track.artwork_path || track.coverUrl || track.thumbnail;
               
               return (
                 <div 
-                  key={track.id} 
+                  key={trackIdentifier || Math.random()} 
                   className="flex items-center group cursor-pointer"
                   onClick={() => playTrack(track, queue, activePlaylistId)}
                 >
                   <span className={`text-[11px] font-black w-8 transition-colors ${isPlayingThis ? 'text-[#a33333]' : 'text-[#111] group-hover:text-[#a33333]'}`}>{actualIndex}</span>
                   
                   <div className="w-[42px] h-[42px] bg-gray-200 ml-2 flex-shrink-0 overflow-hidden shadow-sm relative">
-                    {track.has_artwork && track.artwork_path ? (
-                      <img src={getMediaUrl(track.artwork_path)} alt={track.title} className="w-full h-full object-cover" />
+                    {imgUrl ? (
+                      <img src={imgUrl.startsWith('http') ? imgUrl : getMediaUrl(imgUrl)} alt={track.title} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-[#111]" />
                     )}

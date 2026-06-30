@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
-const Jimp = require('jimp');
 const db = require('./db.cjs');
 const Downloader = require('./downloader.cjs');
 
@@ -185,6 +184,12 @@ function getMimeType(filePath) {
         return new Response('Path parameter missing', { status: 400 });
       }
 
+      // Map fonts/ to temp fonts directory
+      if (filePath.startsWith('fonts/')) {
+        const fontName = filePath.split('fonts/')[1];
+        filePath = path.join(app.getPath('temp'), 'stero_fonts', fontName);
+      }
+
       // On Windows, fix paths starting with a slash, e.g. /C:/path -> C:/path
       if (filePath.startsWith('/') && filePath[2] === ':') {
         filePath = filePath.slice(1);
@@ -214,6 +219,34 @@ function getMimeType(filePath) {
       return new Response('Error loading resource', { status: 500 });
     }
   });
+
+  // Extract fonts from app.asar to temp directory for media protocol serving
+  const tempFontsDir = path.join(app.getPath('temp'), 'stero_fonts');
+  async function extractFonts() {
+    try {
+      if (!fs.existsSync(tempFontsDir)) {
+        fs.mkdirSync(tempFontsDir, { recursive: true });
+      }
+      const publicFontsDir = app.isPackaged 
+        ? path.join(process.resourcesPath, 'app.asar', 'public', 'fonts')
+        : path.join(__dirname, '..', 'public', 'fonts');
+
+      if (fs.existsSync(publicFontsDir)) {
+        const fonts = fs.readdirSync(publicFontsDir);
+        for (const font of fonts) {
+          const src = path.join(publicFontsDir, font);
+          const dest = path.join(tempFontsDir, font);
+          if (!fs.existsSync(dest)) {
+            fs.copyFileSync(src, dest);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error extracting fonts:', err);
+    }
+  }
+
+  await extractFonts();
 
   createWindow();
 
@@ -326,26 +359,12 @@ ipcMain.handle('scan-folder', async (event, folderPath) => {
             const fullArtPath = path.join(artworkFolder, artworkFileName);
             
             if (!fs.existsSync(fullArtPath)) {
-              const image = await Jimp.read(pic.data);
-              await image.cover(400, 400).writeAsync(fullArtPath);
+              await fs.promises.writeFile(fullArtPath, pic.data);
             }
             hasArtwork = 1;
             artworkPath = fullArtPath;
           } catch (artErr) {
             console.error('Error saving artwork for:', filePath, artErr.message);
-            // Fallback to saving raw data if Jimp fails
-            try {
-              const hash = crypto.createHash('md5').update(pic.data).digest('hex');
-              const artworkFileName = `art-${hash}.jpg`;
-              const fullArtPath = path.join(artworkFolder, artworkFileName);
-              if (!fs.existsSync(fullArtPath)) {
-                fs.writeFileSync(fullArtPath, pic.data);
-              }
-              hasArtwork = 1;
-              artworkPath = fullArtPath;
-            } catch (fallbackErr) {
-              console.error('Fallback failed:', fallbackErr.message);
-            }
           }
         }
       }
@@ -476,6 +495,10 @@ ipcMain.handle('yt-get-album', async (event, browseId) => {
 
 ipcMain.handle('yt-get-stream-url', async (event, videoId) => {
   return await downloader.getStreamUrl(videoId);
+});
+
+ipcMain.handle('yt-get-recommendations', async (event, videoId) => {
+  return await downloader.getRecommendations(videoId);
 });
 
 ipcMain.handle('yt-download', async (event, songMeta) => {

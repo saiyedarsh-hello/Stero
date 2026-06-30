@@ -86,6 +86,7 @@ export default function PlayerBar() {
     cycleRepeatMode,
     toggleFavorite,
     setActiveView,
+    goBackView,
     setEditingSong,
     activePlaylistId,
     dominantColor,
@@ -111,6 +112,7 @@ export default function PlayerBar() {
     setShuffle: state.setShuffle,
     cycleRepeatMode: state.cycleRepeatMode,
     toggleFavorite: state.toggleFavorite,
+    goBackView: state.goBackView,
     setActiveView: state.setActiveView,
     setEditingSong: state.setEditingSong,
     activePlaylistId: state.activePlaylistId,
@@ -214,7 +216,26 @@ export default function PlayerBar() {
       }
       
       if (isPlaying) {
-        audioRef.current.play().catch((err) => console.warn(err));
+        audioRef.current.play().catch((err) => {
+          console.warn("Playback failed on play():", err);
+          if ((activeTrack.isStream || activeTrack.filepath?.startsWith('yt-stream://')) && window.electron) {
+            console.log("Attempting to refresh expired stream URL on play failure...");
+            window.electron.ytGetStreamUrl(activeTrack.id || activeTrack.videoId).then(result => {
+              if (result && result.success && result.url) {
+                const currentPos = audioRef.current.currentTime || 0;
+                usePlayerStore.setState(state => ({
+                  activeTrack: { ...state.activeTrack, filepath: result.url }
+                }));
+                setTimeout(() => {
+                  if (audioRef.current) {
+                    audioRef.current.currentTime = currentPos;
+                    audioRef.current.play().catch(e => console.error("Retry failed:", e));
+                  }
+                }, 100);
+              }
+            }).catch(e => console.error("Failed to refresh stream URL:", e));
+          }
+        });
       } else {
         audioRef.current.pause();
       }
@@ -471,7 +492,7 @@ export default function PlayerBar() {
 
   const toggleVisualizer = () => {
     if (activeView === 'visualizer') {
-      setActiveView('dashboard');
+      goBackView();
     } else {
       setActiveView('visualizer');
       // Create/Resume AudioContext inside the user gesture stack
@@ -491,6 +512,31 @@ export default function PlayerBar() {
     if (!state.activeTrack) return;
 
     console.error('Audio playback error:', e);
+
+    const isStream = state.activeTrack.isStream || state.activeTrack.filepath?.startsWith('yt-stream://');
+    
+    if (isStream && window.electron) {
+        console.log("Attempting to refresh expired stream URL on error event...");
+        window.electron.ytGetStreamUrl(state.activeTrack.id || state.activeTrack.videoId).then(result => {
+            if (result && result.success && result.url) {
+                const currentPos = audioRef.current.currentTime || 0;
+                usePlayerStore.setState(s => ({
+                  activeTrack: { ...s.activeTrack, filepath: result.url }
+                }));
+                setTimeout(() => {
+                  if (audioRef.current) {
+                    audioRef.current.currentTime = currentPos;
+                    if (usePlayerStore.getState().isPlaying) {
+                       audioRef.current.play().catch(err => console.error("Retry play failed:", err));
+                    }
+                  }
+                }, 100);
+            } else {
+                state.nextTrack();
+            }
+        });
+        return;
+    }
 
     // Debounce: prevent rapid auto-skipping if multiple tracks fail in a row
     const now = Date.now();

@@ -25,6 +25,7 @@ class Downloader {
     this.activeDownloads = new Map();
     this.maxConcurrent = 2; // Limit concurrent downloads
     this.completed = [];
+    this.searchCache = new Map(); // key = "type:query", value = { data, timestamp }
     
     // Will be set when a renderer connects to receive progress
     this.webContents = null;
@@ -60,6 +61,52 @@ class Downloader {
     });
   }
 
+  pipeStream(directUrl, req, res) {
+    const https = require('https');
+    const proxyOptions = {};
+    if (req.headers.range) {
+      proxyOptions.headers = {
+        'Range': req.headers.range
+      };
+    }
+
+    const proxyReq = https.get(directUrl, proxyOptions, (proxyRes) => {
+      if (proxyRes.statusCode !== 200 && proxyRes.statusCode !== 206) {
+        console.error('[Streaming Proxy] Upstream returned:', proxyRes.statusCode);
+        if (!res.headersSent) {
+          res.writeHead(proxyRes.statusCode || 502);
+          res.end('Upstream error');
+        }
+        return;
+      }
+
+      const headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Accept-Ranges': 'bytes',
+        'Connection': 'close'
+      };
+      
+      if (proxyRes.headers['content-type']) headers['Content-Type'] = proxyRes.headers['content-type'];
+      if (proxyRes.headers['content-length']) headers['Content-Length'] = proxyRes.headers['content-length'];
+      if (proxyRes.headers['content-range']) headers['Content-Range'] = proxyRes.headers['content-range'];
+
+      res.writeHead(proxyRes.statusCode, headers);
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      console.error('[Streaming Proxy] Pipe error:', err);
+      if (!res.headersSent) {
+        res.writeHead(502);
+        res.end('Proxy error');
+      }
+    });
+
+    req.on('close', () => {
+      proxyReq.destroy();
+    });
+  }
+
   handleStreamProxy(req, res) {
     const urlParts = new URL(req.url, `http://${req.headers.host}`);
     if (urlParts.pathname !== '/stream') {
@@ -71,6 +118,14 @@ class Downloader {
     if (!videoId) {
       res.writeHead(400);
       return res.end('Missing videoId');
+    }
+
+    // Check Cache first
+    const cached = streamCache.get(videoId);
+    const now = Date.now();
+    if (cached && (now - cached.timestamp < CACHE_DURATION)) {
+      this.pipeStream(cached.url, req, res);
+      return;
     }
 
     // First, resolve the direct URL using yt-dlp -g
@@ -108,51 +163,10 @@ class Downloader {
         return;
       }
 
-      // Pipe the audio data through the proxy, supporting Range requests for seeking
-      const https = require('https');
-      
-      const proxyOptions = {};
-      if (req.headers.range) {
-        proxyOptions.headers = {
-          'Range': req.headers.range
-        };
-      }
+      // Save to cache
+      streamCache.set(videoId, { url: directUrl, timestamp: Date.now() });
 
-      const proxyReq = https.get(directUrl, proxyOptions, (proxyRes) => {
-        if (proxyRes.statusCode !== 200 && proxyRes.statusCode !== 206) {
-          console.error('[Streaming Proxy] Upstream returned:', proxyRes.statusCode);
-          if (!res.headersSent) {
-            res.writeHead(proxyRes.statusCode || 502);
-            res.end('Upstream error');
-          }
-          return;
-        }
-
-        const headers = {
-          'Access-Control-Allow-Origin': '*',
-          'Accept-Ranges': 'bytes',
-          'Connection': 'close'
-        };
-        
-        if (proxyRes.headers['content-type']) headers['Content-Type'] = proxyRes.headers['content-type'];
-        if (proxyRes.headers['content-length']) headers['Content-Length'] = proxyRes.headers['content-length'];
-        if (proxyRes.headers['content-range']) headers['Content-Range'] = proxyRes.headers['content-range'];
-
-        res.writeHead(proxyRes.statusCode, headers);
-        proxyRes.pipe(res);
-      });
-
-      proxyReq.on('error', (err) => {
-        console.error('[Streaming Proxy] Pipe error:', err);
-        if (!res.headersSent) {
-          res.writeHead(502);
-          res.end('Proxy error');
-        }
-      });
-
-      req.on('close', () => {
-        proxyReq.destroy();
-      });
+      this.pipeStream(directUrl, req, res);
     });
   }
 
@@ -179,13 +193,159 @@ class Downloader {
     return await this.youtubeMusicApiPromise;
   }
 
-  async search(query) {
+  async getRecommendations(videoId) {
     try {
       await this.initYTMusic();
+      const res = await this.ytmusic.getUpNexts(videoId);
+
+      const mapped = (res || []).filter(r => {
+        if (!r.videoId) return false;
+        const title = (r.name || r.title || '').toLowerCase();
+        const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
+        return !excludeKeywords.some(keyword => title.includes(keyword));
+      }).map(r => {
+        let thumb = r.thumbnail || null;
+        if (r.thumbnails && r.thumbnails.length > 0) {
+          thumb = r.thumbnails[r.thumbnails.length - 1].url;
+        }
+
+        let artistVal = 'Unknown Artist';
+        const rawArtist = r.artist || r.artists;
+        if (rawArtist) {
+          if (typeof rawArtist === 'string') {
+            artistVal = rawArtist;
+          } else if (Array.isArray(rawArtist)) {
+            artistVal = rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ');
+          } else if (typeof rawArtist === 'object') {
+            artistVal = rawArtist.name || 'Unknown Artist';
+          }
+        }
+
+        const totalSeconds = typeof r.duration === 'number' ? Math.floor(r.duration) : 0;
+
+        return {
+          videoId: r.videoId,
+          title: r.name || r.title || 'Unknown Title',
+          artist: artistVal,
+          album: 'Recommended',
+          duration: totalSeconds,
+          coverUrl: thumb,
+          thumbnail: thumb
+        };
+      });
+
+      console.log(`[Recommendations] Fetched ${mapped.length} tracks for videoId: ${videoId}`);
+      if (mapped.length === 0) throw new Error("Empty recommendations");
+      return mapped;
+    } catch (err) {
+      console.error('[Recommendations] Error for videoId:', videoId, err);
+      // Fallback: search for songs by the same artist/title to build a queue
+      try {
+        const songData = await this.ytmusic.getSong(videoId);
+        const artistName = songData?.artist?.name || songData?.artists?.[0]?.name || '';
+        const fallbackRes = await this.ytmusic.searchSongs(`${artistName} songs`);
+        const items = fallbackRes ? fallbackRes.slice(0, 30) : [];
+        
+        const mappedFallback = items.filter(r => {
+          if (!r.videoId || r.videoId === videoId) return false;
+          const title = (r.name || r.title || '').toLowerCase();
+          const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
+          return !excludeKeywords.some(keyword => title.includes(keyword));
+        }).map(r => {
+          let thumb = r.thumbnail || null;
+          if (r.thumbnails && r.thumbnails.length > 0) thumb = r.thumbnails[r.thumbnails.length - 1].url;
+          return {
+            videoId: r.videoId,
+            title: r.name || r.title || 'Unknown Title',
+            artist: (() => {
+              const rawArtist = r.artist || r.artists;
+              if (rawArtist) {
+                if (typeof rawArtist === 'string') return rawArtist;
+                if (Array.isArray(rawArtist)) return rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ');
+                if (typeof rawArtist === 'object') return rawArtist.name || 'Unknown Artist';
+              }
+              return 'Unknown Artist';
+            })(),
+            album: 'Recommended (Fallback)',
+            duration: Math.floor(r.duration || 0),
+            coverUrl: thumb,
+            thumbnail: thumb
+          };
+        });
+        return mappedFallback;
+      } catch (fallbackErr) {
+        return [];
+      }
+    }
+  }
+
+  async getAlbum(browseId) {
+    try {
+      await this.initYTMusic();
+      const res = await this.ytmusic.getAlbum(browseId);
+      if (!res) return null;
+
+      let albumThumb = null;
+      if (res.thumbnails && res.thumbnails.length > 0) {
+        albumThumb = res.thumbnails[res.thumbnails.length - 1].url;
+      }
+
+      const tracks = (res.songs || res.tracks || []).filter(t => t.videoId).map(t => {
+        let tThumb = albumThumb;
+        if (t.thumbnails && t.thumbnails.length > 0) {
+          tThumb = t.thumbnails[t.thumbnails.length - 1].url;
+        }
+        
+        let artistVal = res.artist?.name || 'Unknown Artist';
+        if (t.artist) {
+          artistVal = Array.isArray(t.artist) ? t.artist.map(a => a.name).join(', ') : (t.artist.name || artistVal);
+        }
+
+        return {
+          videoId: t.videoId,
+          title: t.name || t.title || 'Unknown Title',
+          artist: artistVal,
+          album: res.name || res.title || 'Unknown Album',
+          duration: t.duration ? Math.floor(t.duration) : 0,
+          coverUrl: tThumb,
+          thumbnail: tThumb
+        };
+      });
+
+      return {
+        id: browseId,
+        title: res.name || res.title || 'Unknown Album',
+        artist: res.artist?.name || 'Unknown Artist',
+        year: res.year,
+        coverUrl: albumThumb,
+        tracks
+      };
+    } catch (err) {
+      console.error('[YT Album] Error fetching album:', err);
+      return null;
+    }
+  }
+
+  async search(query) {
+    try {
+      const cacheKey = `song:${query.trim().toLowerCase()}`;
+      const cached = this.searchCache?.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp < 15 * 60 * 1000)) { // 15 min cache
+        return cached.data;
+      }
+
+      await this.initYTMusic();
       const res = await this.ytmusic.searchSongs(query);
-      const items = res ? res.slice(0, 20) : [];
+      const items = res ? res.slice(0, 35) : [];
       
-      const mapped = items.filter(r => r.videoId).map(r => {
+      const filtered = items.filter(r => {
+        if (!r.videoId) return false;
+        const title = (r.name || r.title || '').toLowerCase();
+        const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
+        return !excludeKeywords.some(keyword => title.includes(keyword));
+      });
+
+      const mapped = filtered.slice(0, 20).map(r => {
         // duration is in seconds from ytmusic-api
         const totalSeconds = Math.floor(r.duration || 0);
         const mins = Math.floor(totalSeconds / 60);
@@ -206,6 +366,10 @@ class Downloader {
           thumbnail: thumb
         };
       });
+
+      if (mapped.length > 0) {
+        this.searchCache.set(cacheKey, { data: mapped, timestamp: Date.now() });
+      }
       return mapped;
     } catch (err) {
       console.error('ytmusic-api error:', err);
@@ -215,10 +379,51 @@ class Downloader {
 
   async searchAlbums(query) {
     try {
+      const cacheKey = `album:${query.trim().toLowerCase()}`;
+      const cached = this.searchCache?.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp < 15 * 60 * 1000)) {
+        return cached.data;
+      }
+
       await this.initYTMusic();
+
+      // 1. Fetch matching songs to extract their original albums
+      let songAlbums = [];
+      try {
+        const songs = await this.ytmusic.searchSongs(query);
+        if (songs && songs.length > 0) {
+          songs.slice(0, 5).forEach(s => {
+            if (s.album && s.album.albumId) {
+              songAlbums.push({
+                id: s.album.albumId,
+                browseId: s.album.albumId,
+                title: s.album.name,
+                artist: s.artist?.name || 'Unknown Artist',
+                year: '',
+                coverUrl: Array.isArray(s.thumbnails) && s.thumbnails.length > 0
+                          ? s.thumbnails[s.thumbnails.length - 1].url
+                          : null,
+                type: 'album'
+              });
+            }
+          });
+        }
+      } catch (songErr) {
+        console.warn('Failed to extract albums from song search:', songErr);
+      }
+
+      // 2. Fetch standard album results
       const res = await this.ytmusic.searchAlbums(query);
-      const items = res ? res.slice(0, 20) : [];
-      return items.filter(r => r.albumId).map(r => ({
+      const items = res ? res.slice(0, 30) : [];
+      
+      const filtered = items.filter(r => {
+        if (!r.albumId) return false;
+        const name = (r.name || '').toLowerCase();
+        const excludeKeywords = ['remix', 'cover', 'tribute', 'instrumental', 'karaoke', 'lofi', 'lo-fi', 'parody'];
+        return !excludeKeywords.some(keyword => name.includes(keyword));
+      });
+
+      const mapped = filtered.slice(0, 20).map(r => ({
         id: r.albumId,
         browseId: r.albumId,
         title: r.name,
@@ -229,6 +434,15 @@ class Downloader {
                   : null,
         type: 'album'
       }));
+
+      // 3. Merge: place song-extracted albums at the top, then standard ones, removing duplicates
+      const combined = [...songAlbums, ...mapped];
+      const unique = Array.from(new Map(combined.map(a => [a.id, a])).values());
+
+      if (unique.length > 0) {
+        this.searchCache.set(cacheKey, { data: unique, timestamp: Date.now() });
+      }
+      return unique;
     } catch (err) {
       console.error('searchAlbums error:', err);
       return [];
@@ -239,24 +453,158 @@ class Downloader {
     try {
       if (!artistId) return [];
       await this.initYTMusic();
-      const res = await this.ytmusic.getArtist(artistId);
-      if (res && (res.topAlbums || res.topSingles)) {
-        const albums = [...(res.topAlbums || []), ...(res.topSingles || [])];
-        return albums.slice(0, 5).map(r => ({
-          id: r.albumId || r.browseId,
-          browseId: r.albumId || r.browseId,
-          title: r.name || r.title,
-          year: r.year || '',
-          coverUrl: Array.isArray(r.thumbnails) && r.thumbnails.length > 0
-                    ? r.thumbnails[r.thumbnails.length - 1].url
-                    : null,
-          artist: res.name || 'Unknown Artist',
-          type: 'album'
-        }));
+      
+      // Fetch raw browse response from Innertube
+      const rawData = await this.ytmusic.constructRequest("browse", { browseId: artistId });
+      
+      // Helper traversal functions
+      const traverseString = (obj, ...keys) => {
+        let current = obj;
+        for (const key of keys) {
+          if (current && typeof current === 'object' && key in current) {
+            current = current[key];
+          } else {
+            return '';
+          }
+        }
+        return typeof current === 'string' ? current : '';
+      };
+
+      const traverseList = (obj, ...keys) => {
+        let current = obj;
+        for (const key of keys) {
+          if (current && typeof current === 'object' && key in current) {
+            current = current[key];
+          } else {
+            return [];
+          }
+        }
+        return Array.isArray(current) ? current : [];
+      };
+
+      // Find all carousel shelves recursively
+      const carousels = [];
+      const traverseCarousels = (node) => {
+        if (!node || typeof node !== 'object') return;
+        if (node.musicCarouselShelfRenderer) {
+          carousels.push(node.musicCarouselShelfRenderer);
+          return;
+        }
+        for (const key of Object.keys(node)) {
+          traverseCarousels(node[key]);
+        }
+      };
+      traverseCarousels(rawData);
+
+      // Find the specific Albums shelf dynamically by checking header text
+      let albumsShelf = null;
+      for (const carousel of carousels) {
+        const titleText = carousel.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.[0]?.text || '';
+        const lowerTitle = titleText.toLowerCase();
+        
+        // Match only shelves representing albums (avoiding 'singles', 'videos', 'featured on', etc.)
+        if ((lowerTitle.includes('album') || lowerTitle.includes('alben') || lowerTitle.includes('álbum')) && 
+            !lowerTitle.includes('single') && !lowerTitle.includes('video') && !lowerTitle.includes('feature')) {
+          albumsShelf = carousel;
+          break;
+        }
       }
-      return [];
+
+      // If we couldn't find an Albums shelf, fall back to the first carousel
+      if (!albumsShelf && carousels.length > 0) {
+        albumsShelf = carousels[0];
+      }
+
+      if (!albumsShelf || !albumsShelf.contents) return [];
+
+      // Extract target artist name from header to double check matches
+      let targetArtistName = traverseString(rawData, "header", "musicImmersiveHeaderRenderer", "title", "text") || 
+                           traverseString(rawData, "header", "musicVisualHeaderRenderer", "title", "text") || '';
+      
+      if (!targetArtistName && rawData.header) {
+        // Fallback title extraction
+        const headerObj = rawData.header.musicImmersiveHeaderRenderer || rawData.header.musicVisualHeaderRenderer || rawData.header;
+        targetArtistName = headerObj.title?.runs?.[0]?.text || '';
+      }
+      
+      const targetArtist = targetArtistName.toLowerCase().trim();
+
+      const mappedAlbums = albumsShelf.contents
+        .map(item => {
+          const albumObj = item.musicTwoRowItemRenderer;
+          if (!albumObj) return null;
+
+          const title = albumObj.title?.runs?.[0]?.text || albumObj.title?.text || '';
+          const albumId = albumObj.navigationEndpoint?.browseEndpoint?.browseId ||
+                          albumObj.title?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || '';
+          
+          let year = '';
+          const subtitleRuns = albumObj.subtitle?.runs || [];
+          const lastRunText = subtitleRuns.length > 0 ? subtitleRuns[subtitleRuns.length - 1].text.trim() : '';
+          if (/^\d{4}$/.test(lastRunText)) {
+            year = lastRunText;
+          }
+
+          let artistName = '';
+          if (subtitleRuns.length > 0) {
+            // Find runs that represent the artist (avoiding bullet characters, years, and type tags)
+            const artistRun = subtitleRuns.find(run => {
+              const text = run.text.trim();
+              return text !== '•' && !/^\d{4}$/.test(text) && text.toLowerCase() !== 'album' && text.toLowerCase() !== 'single' && text.toLowerCase() !== 'ep';
+            });
+            if (artistRun) {
+              artistName = artistRun.text.trim();
+            }
+          }
+
+          let thumb = null;
+          let thumbObj = albumObj.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
+                         albumObj.thumbnail?.thumbnails ||
+                         albumObj.thumbnails;
+          if (Array.isArray(thumbObj) && thumbObj.length > 0) {
+            thumb = thumbObj[thumbObj.length - 1].url;
+          }
+
+          return {
+            id: albumId,
+            browseId: albumId,
+            title,
+            year,
+            coverUrl: thumb,
+            artist: artistName || targetArtistName || 'Unknown Artist',
+            type: 'album'
+          };
+        })
+        .filter(r => r && r.id);
+
+      // Filter albums strictly to keep only original albums made by the artist itself
+      const filtered = mappedAlbums.filter(r => {
+        const albumName = r.title.toLowerCase();
+        const albumArtist = r.artist.toLowerCase();
+        const target = targetArtist;
+
+        // 1. Exclude cover/remix/tribute/compilation/soundtrack keywords
+        const excludeKeywords = [
+          'remix', 'cover', 'tribute', 'instrumental', 'karaoke', 'lofi', 'lo-fi', 'parody', 'various artists',
+          'bhajan', 'bhakti', 'mantra', 'devotional', 'best of', 'evergreen', 'hits', 'collection', 'soundtrack', 
+          'original motion picture', 'ost', 'ghazal', 'qawwali', 'compilation', 'selection', 'selections', 'greatest', 
+          'classics', 'vol.', 'vol ', 'volume', 'series', 'anniversary'
+        ];
+        const hasExclude = excludeKeywords.some(keyword => albumName.includes(keyword) || albumArtist.includes(keyword));
+        if (hasExclude) return false;
+
+        // 2. Strict primary artist check: The first listed artist must be exactly the followed artist
+        if (albumArtist && target) {
+          const primaryArtist = albumArtist.split(/[,&]/)[0].trim();
+          if (primaryArtist !== target) return false;
+        }
+
+        return true;
+      });
+
+      return filtered.slice(0, 8);
     } catch (err) {
-      console.error('getArtistAlbums error for artist:', artistId, err);
+      console.error('getArtistAlbums raw error for artist:', artistId, err);
       return [];
     }
   }
@@ -308,12 +656,17 @@ class Downloader {
         
         const allItems = [...(res1.content||[]), ...(res2.content||[]), ...(res3.content||[])];
         
-        // Strictly filter to ensure no albums or podcasts (pure songs only)
+        // Strictly filter to ensure no albums or podcasts (pure songs only) and only original songs
         const validSongs = allItems.filter(r => {
           const hasArtist = Array.isArray(r.artist) ? r.artist.length > 0 : !!r.artist;
           const isSongLength = r.duration > 0 && r.duration < 600000; // less than 10 mins
           const isSong = r.type === 'song' || r.type === 'video';
-          return r.videoId && isSong && hasArtist && isSongLength;
+          
+          const title = (r.name || r.title || '').toLowerCase();
+          const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
+          const isOriginal = !excludeKeywords.some(keyword => title.includes(keyword));
+
+          return r.videoId && isSong && hasArtist && isSongLength && isOriginal;
         });
         const uniqueItems = Array.from(new Map(validSongs.map(r => [r.videoId, r])).values());
         
@@ -329,34 +682,75 @@ class Downloader {
             coverUrl: Array.isArray(r.thumbnails) && r.thumbnails.length > 0 
                       ? r.thumbnails[r.thumbnails.length - 1].url 
                       : null,
-            duration: r.duration || 0,
+            duration: r.duration ? Math.floor(r.duration / 1000) : 0,
             album: r.album?.name || 'Single',
           };
         });
       }
       
       if (type === 'artist') {
-        const [res1, res2, res3] = await Promise.all([
-          api.search(`${query}`, 'artist'),
-          api.search(`billboard ${query}`, 'artist'),
-          api.search(`global ${query}`, 'artist')
-        ]);
-        
-        const allItems = [...(res1?.content || []), ...(res2?.content || []), ...(res3?.content || [])];
-        const validArtists = allItems.filter(r => r.name);
-        const uniqueItems = Array.from(new Map(validArtists.map(r => [r.browseId || r.name, r])).values());
-        
-        return uniqueItems.map(r => {
+        const cacheKey = `artist:${query.trim().toLowerCase()}`;
+        const cached = this.searchCache?.get(cacheKey);
+        if (cached && (Date.now() - cached.timestamp < 15 * 60 * 1000)) {
+          return cached.data;
+        }
+
+        await this.initYTMusic();
+
+        // 1. Extract artists from matching songs
+        let songArtists = [];
+        try {
+          const songs = await this.ytmusic.searchSongs(query);
+          if (songs && songs.length > 0) {
+            songs.slice(0, 5).forEach(s => {
+              if (s.artist && s.artist.artistId) {
+                songArtists.push({
+                  id: s.artist.artistId,
+                  browseId: s.artist.artistId,
+                  name: s.artist.name,
+                  imageUrl: Array.isArray(s.thumbnails) && s.thumbnails.length > 0
+                            ? s.thumbnails[s.thumbnails.length - 1].url
+                            : null
+                });
+              }
+            });
+          }
+        } catch (songErr) {
+          console.warn('Failed to extract artists from song search:', songErr);
+        }
+
+        // 2. Fetch matching artists directly using the more accurate searchArtists API
+        const res = await this.ytmusic.searchArtists(query);
+        const items = res ? res.slice(0, 20) : [];
+
+        const filtered = items.filter(r => {
+          if (!r.name) return false;
+          const name = r.name.toLowerCase();
+          const excludeKeywords = ['tribute', 'cover band', 'lofi', 'lo-fi', 'instrumental', 'orchestra', 'karaoke'];
+          return !excludeKeywords.some(keyword => name.includes(keyword));
+        });
+
+        const mapped = filtered.map(r => {
           let thumb = null;
           if (r.thumbnails && r.thumbnails.length > 0) {
              thumb = r.thumbnails[r.thumbnails.length - 1].url;
           }
           return {
-            id: r.browseId || r.name,
+            id: r.artistId,
+            browseId: r.artistId,
             name: r.name,
             imageUrl: thumb
           };
         });
+
+        // 3. Merge: place song-extracted artists at the top, then standard ones, removing duplicates
+        const combined = [...songArtists, ...mapped];
+        const unique = Array.from(new Map(combined.map(a => [a.id || a.name, a])).values());
+
+        if (unique.length > 0) {
+          this.searchCache.set(cacheKey, { data: unique, timestamp: Date.now() });
+        }
+        return unique;
       }
       
       const res = await api.search(query, type);

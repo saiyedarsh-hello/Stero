@@ -66,6 +66,9 @@ export default function MusicSection() {
     ytSearchResults,
     ytArtistSearchResults,
     setTrendingData,
+    myTaste,
+    setMyTaste,
+    fetchMyTaste,
     toggleFavorite,
     playHistory,
     songs: allSongs, // Need this to check if a stream is already in the DB favorites
@@ -92,6 +95,9 @@ export default function MusicSection() {
     ytSearchResults: state.ytSearchResults,
     ytArtistSearchResults: state.ytArtistSearchResults,
     setTrendingData: state.setTrendingData,
+    myTaste: state.myTaste,
+    setMyTaste: state.setMyTaste,
+    fetchMyTaste: state.fetchMyTaste,
     toggleFavorite: state.toggleFavorite,
     playHistory: state.playHistory,
     songs: state.songs,
@@ -112,6 +118,7 @@ export default function MusicSection() {
   const [loading, setLoading] = useState(false);
 
   const artistScrollRef = useRef(null);
+  const myTasteScrollRef = useRef(null);
   const songScrollRef = useRef(null);
   const recentScrollRef = useRef(null);
   const followedScrollRef = useRef(null);
@@ -135,13 +142,15 @@ export default function MusicSection() {
       const fetchAll = async () => {
         setLoading(true);
         try {
-          const [newArtists, newSongs] = await Promise.all([
+          const [newArtists, newSongs, myTasteSongs] = await Promise.all([
             fetchTrendingArtists(languageString),
-            fetchTrendingSongs(languageString)
+            fetchTrendingSongs(languageString),
+            fetchMyTaste(languageString)
           ]);
           
           if (isMounted) {
             setTrendingData(newArtists || [], newSongs || []);
+            setMyTaste(myTasteSongs || []);
           }
         } catch (err) {
           console.error("Failed to fetch trending music:", err);
@@ -150,8 +159,23 @@ export default function MusicSection() {
         }
       };
       
-      if (activeView === 'music' && trendingSongs.length === 0 && artists.length === 0) {
-        fetchAll();
+      if (activeView === 'music') {
+        if (trendingSongs.length === 0 && artists.length === 0) {
+          fetchAll();
+        } else {
+          // Dynamic update of My Taste when coming back to the Music view
+          const refreshTaste = async () => {
+            try {
+              const myTasteSongs = await fetchMyTaste(languageString);
+              if (isMounted) {
+                setMyTaste(myTasteSongs || []);
+              }
+            } catch (err) {
+              console.error("Failed to refresh My Taste:", err);
+            }
+          };
+          refreshTaste();
+        }
       }
       
       // Force fetch followed artists albums to ensure they populate
@@ -161,7 +185,7 @@ export default function MusicSection() {
       }
     }
     return () => { isMounted = false; };
-  }, [languageString, fetchTrendingArtists, fetchTrendingSongs, activeView, trendingSongs.length, artists.length, setTrendingData]);
+  }, [languageString, fetchTrendingArtists, fetchTrendingSongs, fetchMyTaste, activeView, trendingSongs.length, artists.length, setTrendingData, setMyTaste]);
   
   let displayArtists = [];
   if (ytArtistSearchResults) {
@@ -204,7 +228,110 @@ export default function MusicSection() {
 
   return (
     <div className="flex flex-col gap-10 select-none animate-fade-in pb-10">
-      
+
+      {/* 0.5 My Taste Row */}
+      {myTaste && myTaste.length > 0 && !ytSearchResults && !ytArtistSearchResults && (
+        <section className="order-0 w-full mb-2">
+          <div className="flex items-center justify-between mb-3 px-4">
+            <h2 className="text-sm font-bold text-white/50 uppercase tracking-widest">
+              My Taste
+            </h2>
+            <div className="flex items-center gap-2">
+              <button onClick={() => scrollContainer(myTasteScrollRef, 'left')} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
+                <ChevronLeft size={14} />
+              </button>
+              <button onClick={() => scrollContainer(myTasteScrollRef, 'right')} className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform active:scale-95">
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+          <div ref={myTasteScrollRef} className="flex overflow-x-auto gap-4 pb-4 px-4 hide-scrollbar snap-x snap-mandatory">
+            {myTaste.slice(0, 10).map((song) => {
+              const dbSong = allSongs?.find(s => s.filepath === `yt-stream://${song.videoId}`);
+              const isFav = dbSong?.favorite === 1;
+              const isDownloaded = allSongs?.some(s => 
+                s.filepath && 
+                !s.filepath.startsWith('yt-stream://') && 
+                s.title?.toLowerCase() === song.title?.toLowerCase() &&
+                s.artist?.toLowerCase() === song.artist?.toLowerCase()
+              );
+              const isDownloading = downloadState?.active?.some(job => job.videoId === song.videoId) || 
+                                    downloadState?.queue?.some(job => job.videoId === song.videoId);
+
+              return (
+                <div 
+                  key={song.videoId} 
+                  onClick={() => playTrack(song, myTaste)}
+                  onMouseEnter={() => preloadTrack(song)}
+                  className="flex-shrink-0 w-80 md:w-96 h-28 rounded-2xl overflow-hidden cursor-pointer group relative shadow-lg snap-start border border-white/5 bg-white/5 hover:bg-white/10 transition-colors flex"
+                >
+                  {/* Backdrop artwork blur */}
+                  <div className="absolute inset-0 z-0 opacity-20 group-hover:opacity-30 transition-opacity">
+                     <RetryImage src={getArtworkUrl(getMediumResUrl(song.coverUrl || song.thumbnail))} fallbackSrc={song.coverUrl || song.thumbnail} alt={song.title} className="w-full h-full object-cover blur-xl scale-125" />
+                  </div>
+                  
+                  {/* Left Side: Artwork */}
+                  <div className="w-28 h-28 relative z-10 flex-shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.5)] bg-black/20">
+                    {(song.coverUrl || song.thumbnail) ? (
+                      <RetryImage src={getArtworkUrl(getMediumResUrl(song.coverUrl || song.thumbnail))} fallbackSrc={song.coverUrl || song.thumbnail} alt={song.title} loading="lazy" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-white/10 to-transparent flex items-center justify-center">
+                        <Disc size={24} className="text-white/20" />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Play size={24} className="text-white ml-1" fill="currentColor" />
+                    </div>
+                  </div>
+
+                  {/* Right Side: Info & Actions */}
+                  <div className="flex-1 p-4 flex flex-col justify-center min-w-0 z-10 relative">
+                    <span className="text-base font-bold text-white truncate group-hover:text-blue-400 transition-colors">{song.title}</span>
+                    <span className="text-xs text-gray-300 truncate mt-0.5">{song.artist}</span>
+                    
+                    <div className="mt-3 flex items-center gap-4">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFavorite(dbSong ? dbSong.id : song.videoId, isFav ? 0 : 1, song);
+                          }}
+                          className={`hover:scale-110 active:scale-95 transition-all ${
+                            isFav ? 'text-red-500' : 'text-white/40 hover:text-white'
+                          }`}
+                          title={isFav ? "Remove from favorites" : "Add to favorites"}
+                        >
+                          <Heart size={14} fill={isFav ? "currentColor" : "none"} />
+                        </button>
+                        
+                        {isDownloaded ? (
+                          <div className="text-green-400" title="Downloaded">
+                            <Check size={14} strokeWidth={3} />
+                          </div>
+                        ) : isDownloading ? (
+                          <div className="text-blue-400" title="Downloading...">
+                            <CloudDownload size={14} className="animate-pulse" />
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startDownload(song);
+                            }}
+                            className="text-white/40 hover:text-white hover:scale-110 active:scale-95 transition-all"
+                            title="Download to library"
+                          >
+                            <CloudDownload size={14} />
+                          </button>
+                        )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* 1. Popular Artist Row */}
       <section className="order-1">
         <div className="flex items-center justify-between mb-4 px-4">

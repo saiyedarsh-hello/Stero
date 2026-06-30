@@ -205,15 +205,54 @@ export default function SongList() {
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
-  const filtered = useMemo(() => rawSongsList.filter(song => {
+  const filtered = useMemo(() => {
     const query = deferredSearchQuery.toLowerCase().trim();
-    if (!query) return true;
-    return (
-      (song.title || '').toLowerCase().includes(query) ||
-      (song.artist || '').toLowerCase().includes(query) ||
-      (song.album || '').toLowerCase().includes(query)
-    );
-  }), [rawSongsList, deferredSearchQuery]);
+    if (!query) return rawSongsList;
+
+    const searchTerms = query.split(/\s+/);
+
+    return rawSongsList.map(song => {
+      const title = (song.title || '').toLowerCase();
+      const artist = (song.artist || '').toLowerCase();
+      const album = (song.album || '').toLowerCase();
+
+      let score = 0;
+      let matchesAll = true;
+
+      for (const term of searchTerms) {
+        let termMatched = false;
+        
+        // Title matching
+        if (title === term) { score += 100; termMatched = true; }
+        else if (title.startsWith(term)) { score += 50; termMatched = true; }
+        else if (title.includes(term)) { score += 10; termMatched = true; }
+        
+        // Artist matching
+        if (!termMatched) {
+          if (artist === term) { score += 80; termMatched = true; }
+          else if (artist.startsWith(term)) { score += 40; termMatched = true; }
+          else if (artist.includes(term)) { score += 8; termMatched = true; }
+        }
+        
+        // Album matching
+        if (!termMatched) {
+          if (album === term) { score += 60; termMatched = true; }
+          else if (album.startsWith(term)) { score += 30; termMatched = true; }
+          else if (album.includes(term)) { score += 6; termMatched = true; }
+        }
+
+        if (!termMatched) {
+          matchesAll = false;
+          break;
+        }
+      }
+
+      return { song, score, matchesAll };
+    })
+    .filter(item => item.matchesAll)
+    .sort((a, b) => b.score - a.score)
+    .map(item => item.song);
+  }, [rawSongsList, deferredSearchQuery]);
 
   const handleSort = (field) => {
     if (sortField === field) {
@@ -244,7 +283,25 @@ export default function SongList() {
     if (activeTrack && activeTrack.id === song.id) {
       togglePlay();
     } else {
-      playTrack(song, rawSongsList, activeView === 'album-detail' ? selectedAlbumId : undefined);
+      if (searchQuery && activeView === 'songs') {
+        // Smart Local Queue: play the clicked song, then songs by the same artist, then same album, then random
+        const sameArtist = songs.filter(s => s.id !== song.id && s.artist === song.artist);
+        const sameAlbum = songs.filter(s => s.id !== song.id && s.album === song.album && s.artist !== song.artist);
+        const others = songs.filter(s => s.id !== song.id && s.artist !== song.artist && s.album !== song.album);
+        
+        const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
+        
+        const recommendedQueue = [
+          song,
+          ...shuffle(sameArtist),
+          ...shuffle(sameAlbum),
+          ...shuffle(others)
+        ].slice(0, 100);
+
+        playTrack(song, recommendedQueue);
+      } else {
+        playTrack(song, rawSongsList, activeView === 'album-detail' ? selectedAlbumId : undefined);
+      }
     }
   };
 

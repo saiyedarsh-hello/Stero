@@ -46,7 +46,12 @@ export default function AlbumGrid() {
 
   const filtered = customAlbums.filter(album => {
     const q = searchQuery.toLowerCase().trim();
-    return !q || album.name.toLowerCase().includes(q);
+    if (!q) return true;
+    
+    const searchTerms = q.split(/\s+/);
+    const albumName = album.name.toLowerCase();
+    
+    return searchTerms.every(term => albumName.includes(term));
   });
 
   const handleAlbumClick = (album) => {

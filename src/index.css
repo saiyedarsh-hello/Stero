@@ -1,5 +1,37 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Satoshi';
+  src: url('media://local/?path=fonts/Satoshi-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('media://local/?path=fonts/Satoshi-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('media://local/?path=fonts/Satoshi-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('media://local/?path=fonts/Satoshi-Black.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 * {
   scroll-behavior: smooth;
 }
@@ -12,7 +44,7 @@ body {
   overflow: hidden;
   height: 100vh;
   width: 100vw;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Satoshi', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   background-color: transparent;
   color: #ffffff;
@@ -23,10 +55,13 @@ body {
 
 /* Smooth tabular numbers & display font */
 .font-display {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Satoshi', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+
+
+
 
 /* Ultra-smooth global transitions for a liquid UI feel */
 .transition-all, .transition-colors, .transition-opacity, .transition-transform, .transition-shadow {

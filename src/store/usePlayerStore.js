@@ -92,7 +92,9 @@ export const usePlayerStore = create((set, get) => ({
   // Cached trending data so it only fetches once per session
   trendingArtists: [],
   trendingSongs: [],
+  myTaste: [],
   setTrendingData: (artists, songs) => set({ trendingArtists: artists, trendingSongs: songs }),
+  setMyTaste: (songs) => set({ myTaste: songs }),
   
   ytSearchResults: null,
   setYtSearchResults: (results) => set({ ytSearchResults: results }),
@@ -118,7 +120,7 @@ export const usePlayerStore = create((set, get) => ({
   searchQuery: '',
 
   viewHistory: [{
-    activeView: 'dashboard',
+    activeView: 'music',
     selectedPlaylistId: null,
     selectedAlbumName: null,
     selectedAlbumId: null,
@@ -128,7 +130,8 @@ export const usePlayerStore = create((set, get) => ({
   // Playback State
   activeTrack: null,
   isPlaying: false,
-  volume: 1,
+  volume: localStorage.getItem('stero-volume') !== null ? parseFloat(localStorage.getItem('stero-volume')) : 1,
+  muted: localStorage.getItem('stero-muted') === 'true',
   progress: 0,
   duration: 0,
   queue: [],
@@ -231,6 +234,118 @@ export const usePlayerStore = create((set, get) => ({
   fetchTrendingSongs: async (language) => {
     if (!window.electron) return [];
     return await window.electron.ytSearchTrending(`top ${language} songs`, 'song');
+  },
+
+  fetchMyTaste: async (language) => {
+    if (!window.electron) return [];
+    const state = get();
+    
+    // 1. Gather all songs, and find frequently played / favorite ones
+    const localSongs = state.songs || [];
+    const frequentSongs = localSongs
+      .filter(s => s.play_count && s.play_count > 0)
+      .sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
+    
+    const favoriteSongs = localSongs.filter(s => s.favorite === 1);
+    
+    // Combine to get seed tracks (favorites first, then top played)
+    const seedTracks = [];
+    const seedIds = new Set();
+    
+    favoriteSongs.forEach(s => {
+      const id = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null) || s.id;
+      if (id && !seedIds.has(id)) {
+        seedTracks.push(s);
+        seedIds.add(id);
+      }
+    });
+
+    frequentSongs.forEach(s => {
+      const id = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null) || s.id;
+      if (id && !seedIds.has(id)) {
+        seedTracks.push(s);
+        seedIds.add(id);
+      }
+    });
+
+    // Select up to 4 seed tracks randomly from the top 10
+    const chosenSeeds = seedTracks.slice(0, 10).sort(() => 0.5 - Math.random()).slice(0, 4);
+    
+    let recommendationSongs = [];
+    
+    // 2. Fetch recommendations for these seeds
+    if (chosenSeeds.length > 0) {
+      try {
+        const promises = chosenSeeds.map(async (track) => {
+          const vId = track.videoId || (track.filepath && track.filepath.startsWith('yt-stream://') ? track.filepath.replace('yt-stream://', '') : null);
+          if (vId && window.electron.ytGetRecommendations) {
+            // High-precision recommendations based on a YouTube stream
+            return await window.electron.ytGetRecommendations(vId);
+          } else if (track.artist) {
+            // Fallback: search for trending songs by this artist
+            const primaryArtist = track.artist.split(',')[0].trim();
+            if (primaryArtist && primaryArtist.toLowerCase() !== 'unknown' && primaryArtist.toLowerCase() !== 'unknown artist') {
+              return await window.electron.ytSearchTrending(`${primaryArtist} songs`, 'song');
+            }
+          }
+          return [];
+        });
+        
+        const results = await Promise.all(promises);
+        results.forEach(res => {
+          if (Array.isArray(res)) {
+            recommendationSongs = recommendationSongs.concat(res);
+          }
+        });
+      } catch (err) {
+        console.error('Failed to fetch high-precision recommendations for My Taste:', err);
+      }
+    }
+
+    // 3. Fallback to general hits if we got nothing
+    if (recommendationSongs.length === 0) {
+      try {
+        const query = `${language} hit songs`;
+        recommendationSongs = await window.electron.ytSearchTrending(query, 'song') || [];
+      } catch (err) {
+        console.error('Failed to fetch fallback trending songs:', err);
+      }
+    }
+
+    // 4. Client-side original song filter (double safety check)
+    const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
+    const filteredRecs = recommendationSongs.filter(r => {
+      const title = (r.title || r.name || '').toLowerCase();
+      return !excludeKeywords.some(keyword => title.includes(keyword));
+    });
+
+    // Remove duplicates
+    const uniqueRecommendations = Array.from(
+      new Map(filteredRecs.map(s => [s.videoId || s.id, s])).values()
+    );
+
+    // 5. Mix in user's frequently played tracks
+    const frequentMix = frequentSongs.slice(0, 10).map(s => {
+      const vId = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null);
+      return {
+        id: s.id,
+        videoId: vId,
+        title: s.title,
+        artist: s.artist,
+        album: s.album || 'Library',
+        coverUrl: s.artwork_path || null,
+        duration: s.duration || 0,
+        filepath: s.filepath,
+        favorite: s.favorite || 0,
+        play_count: s.play_count || 0
+      };
+    });
+
+    // 6. Combine and shuffle
+    const combined = [...frequentMix, ...uniqueRecommendations];
+    const shuffled = combined.sort(() => 0.5 - Math.random());
+    
+    return shuffled.slice(0, 30);
   },
 
   fetchTrendingArtists: async (language) => {
@@ -729,7 +844,7 @@ export const usePlayerStore = create((set, get) => ({
         artwork_path: t.coverUrl || t.thumbnail || t.artwork_path,
         has_artwork: !!(t.coverUrl || t.thumbnail || t.artwork_path || t.has_artwork),
         isStream: isYtStream,
-        filepath: isYtStream ? `yt-stream://${vId}` : (t.filepath || ''),
+        filepath: (t.filepath && t.filepath.startsWith('http')) ? t.filepath : (isYtStream ? `yt-stream://${vId}` : (t.filepath || '')),
         duration: t.duration || 0,
         favorite: isFav
       };
@@ -745,7 +860,7 @@ export const usePlayerStore = create((set, get) => ({
       artwork_path: songMeta.coverUrl || songMeta.thumbnail || songMeta.artwork_path,
       has_artwork: !!(songMeta.coverUrl || songMeta.thumbnail || songMeta.artwork_path || songMeta.has_artwork),
       isStream: true,
-      filepath: `yt-stream://${songMeta.videoId || songMeta.id}`,
+      filepath: (songMeta.filepath && songMeta.filepath.startsWith('http')) ? songMeta.filepath : `yt-stream://${songMeta.videoId || songMeta.id}`,
       duration: songMeta.duration || 0,
       favorite: songMeta.favorite !== undefined ? songMeta.favorite : (() => {
         const vId = songMeta.videoId || (typeof songMeta.id === 'string' ? songMeta.id : null);
@@ -788,18 +903,55 @@ export const usePlayerStore = create((set, get) => ({
     });
   },
 
+  fetchRecommendationsForTrack: async (track) => {
+    const videoId = track.videoId || track.id;
+    if (!videoId || !window.electron || !window.electron.ytGetRecommendations) return;
+    
+    try {
+      const recommendations = await window.electron.ytGetRecommendations(videoId);
+      if (recommendations && recommendations.length > 0) {
+        const mappedRecs = recommendations.map(r => {
+          const vId = r.videoId || r.id;
+          return {
+            ...r,
+            id: vId,
+            videoId: vId,
+            isStream: true,
+            filepath: `yt-stream://${vId}`,
+            favorite: (() => {
+              const dbMatch = get().songs.find(s => s.filepath === `yt-stream://${vId}`);
+              return dbMatch ? dbMatch.favorite : 0;
+            })()
+          };
+        });
+        
+        const currentActive = get().activeTrack;
+        if (currentActive && (currentActive.videoId === videoId || currentActive.id === videoId)) {
+          set({
+            queue: [currentActive, ...mappedRecs],
+            originalQueue: [currentActive, ...mappedRecs],
+            queueIndex: 0
+          });
+          console.log(`[Queue] Populated queue with ${mappedRecs.length} recommendations for: ${currentActive.title}`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch recommendations for queue:', err);
+    }
+  },
+
   playTrack: (track, trackList = [], playlistId = undefined) => {
     get().addToHistory(track);
     
     // Route YouTube search results to streamTrack to get saved to DB first
-    const isUnsavedYoutube = !track.filepath && (track.videoId || (track.id && typeof track.id === 'string'));
+    const isUnsavedYoutube = !!track.videoId && (!track.id || typeof track.id === 'string');
     if (isUnsavedYoutube) {
       get().streamTrack(track, trackList);
       return;
     }
 
-    const list = trackList.length > 0 ? trackList : [track];
-    const index = list.findIndex(t => t.id === track.id || (t.videoId || t.id) === (track.videoId || track.id));
+    let list = trackList.length > 0 ? trackList : [track];
+    let index = list.findIndex(t => t.id === track.id || (t.videoId || t.id) === (track.videoId || track.id));
     
     let resolvedPlaylistId = null;
     if (playlistId !== undefined) {
@@ -809,6 +961,23 @@ export const usePlayerStore = create((set, get) => ({
       if (state.activeView === 'album-detail' || state.activeView === 'playlist-detail') {
         resolvedPlaylistId = state.selectedAlbumId || state.selectedPlaylistId;
       }
+    }
+
+    // 1. Context Detection & Filtering
+    const state = get();
+    const isStream = track.isStream || !!track.videoId || track.filepath?.startsWith('yt-stream://') || track.filepath?.startsWith('http');
+    const isMusicView = state.activeView === 'music';
+
+    // 2. Instant Playback (Zero-Latency Start)
+    if (isStream && isMusicView && !resolvedPlaylistId) {
+       // Isolate the song and set active queue to just [track]
+       list = [track];
+       index = 0;
+       
+       // 3. Background Recommendation Fetching
+       setTimeout(() => {
+         get().fetchRecommendationsForTrack(track);
+       }, 50);
     }
 
     set({
@@ -979,8 +1148,14 @@ export const usePlayerStore = create((set, get) => ({
     }
   },
 
-  setVolume: (vol) => set({ volume: vol }),
-  setMuted: (isMuted) => set({ muted: isMuted }),
+  setVolume: (vol) => {
+    set({ volume: vol });
+    localStorage.setItem('stero-volume', vol);
+  },
+  setMuted: (isMuted) => {
+    set({ muted: isMuted });
+    localStorage.setItem('stero-muted', isMuted);
+  },
   setShuffle: (shuf) => set((state) => {
     const originalQ = state.originalQueue || state.queue || [];
     if (shuf) {

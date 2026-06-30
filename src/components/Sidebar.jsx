@@ -17,7 +17,8 @@ import {
   Flame,
   MoreHorizontal,
   Check,
-  AlertCircle
+  AlertCircle,
+  Home
 } from 'lucide-react';
 
 const getMediaUrl = (path) => {

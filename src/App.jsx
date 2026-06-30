@@ -6,7 +6,7 @@ import Sidebar from './components/Sidebar';
 import PlayerBar from './components/PlayerBar';
 import WindowControls from './components/WindowControls';
 import MusicSection from './components/MusicSection';
-import { Search, ChevronLeft, ChevronRight, RefreshCw, Menu, FolderSearch, X, Clock } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, RefreshCw, Menu, FolderSearch, X, Clock, Home } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import ColorWorker from './workers/colorWorker.js?worker&inline';
@@ -98,9 +98,11 @@ export default function App() {
     viewHistory,
     goBackView,
     goForwardView,
-    initDownloadListener
+    initDownloadListener,
+    setActiveView
   } = usePlayerStore(useShallow(state => ({
     activeView: state.activeView,
+    setActiveView: state.setActiveView,
     activeTrack: state.activeTrack,
     dominantColor: state.dominantColor,
     setDominantColor: state.setDominantColor,
@@ -194,7 +196,7 @@ export default function App() {
 
   // Global dominant color extraction via Web Worker to prevent UI blocking
   const colorWorkerRef = useRef(null);
-  
+
 
   useEffect(() => {
     try {
@@ -367,7 +369,7 @@ export default function App() {
   // Live Search for YouTube Music View
   useEffect(() => {
     if (activeView !== 'music') return;
-    
+
     if (!searchQuery.trim()) {
       usePlayerStore.getState().setYtSearchResults(null);
       usePlayerStore.getState().setYtArtistSearchResults(null);
@@ -378,7 +380,7 @@ export default function App() {
     const timer = setTimeout(async () => {
       try {
         if (!window.electron) return;
-        
+
         const [results, artistResults, albumResults] = await Promise.all([
           window.electron.ytSearch(searchQuery),
           window.electron.ytSearchTrending(searchQuery, 'artist'),
@@ -421,11 +423,11 @@ export default function App() {
   const handleSearchKeyDown = async (e) => {
     if (e.key === 'Enter') {
       const queryToAdd = searchQuery;
-      
+
       // Close dropdown with animation first
       setIsSearchFocused(false);
       e.currentTarget.blur();
-      
+
       // Add to history after the exit animation completes (250ms)
       setTimeout(() => {
         if (queryToAdd.trim()) {
@@ -446,12 +448,13 @@ export default function App() {
       )}
 
       {/* Blurred Album Art Background */}
-      <div 
+      <div
         className="absolute inset-0 bg-cover bg-center transition-all duration-1000 ease-in-out pointer-events-none opacity-40"
         style={{
           backgroundImage: (activeTrack?.artwork_path || activeTrack?.coverUrl || activeTrack?.thumbnail) ? `url("${getMediaUrl(activeTrack.artwork_path || activeTrack.coverUrl || activeTrack.thumbnail)}")` : 'none',
-          filter: 'blur(120px) saturate(150%)',
-          transform: 'scale(1.2)',
+          filter: 'blur(65px) saturate(150%)',
+          transform: 'scale(1.2) translate3d(0, 0, 0)',
+          willChange: 'transform, opacity',
           zIndex: 0
         }}
       />
@@ -462,7 +465,7 @@ export default function App() {
       <div className="flex flex-1 w-full overflow-hidden relative z-10">
 
         {/* Collapsible Sidebar */}
-        <div className={`transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${isSearchFocused ? 'blur-[4px] opacity-40 scale-[0.99] pointer-events-none' : ''}`}>
+        <div className="transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]">
           <Sidebar
             isCollapsed={isSidebarCollapsed}
             onToggleCollapse={() => setIsSidebarCollapsed(true)}
@@ -515,9 +518,16 @@ export default function App() {
             </div>
 
             {/* Center aligned: Search field */}
-            <div className="flex justify-center relative">
+            <div className="flex justify-center items-center gap-4 relative">
               {activeView !== 'visualizer' && (
                 <>
+                  <button
+                    onClick={() => setActiveView('music')}
+                    className={`p-2.5 rounded-full border border-white/10 transition-all duration-300 backdrop-blur-xl ${activeView === 'music' ? 'bg-white/10 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]' : 'bg-white/[0.03] text-gray-400 hover:bg-white/[0.08] hover:text-white'}`}
+                    title="Home"
+                  >
+                    <Home size={18} strokeWidth={2.5} />
+                  </button>
                   <div className="group flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 rounded-full px-6 py-2.5 w-[300px] xl:w-[400px] focus-within:!w-[550px] focus-within:border-white/30 focus-within:bg-white/[0.08] focus-within:shadow-[0_0_35px_rgba(168,85,247,0.15),0_0_15px_rgba(255,255,255,0.05)] transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] backdrop-blur-xl">
                     <Search size={18} className="text-gray-400 group-focus-within:text-white transition-colors duration-300" />
                     <input
@@ -525,7 +535,7 @@ export default function App() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       onFocus={() => setIsSearchFocused(true)}
-                       onBlur={() => {
+                      onBlur={() => {
                         setTimeout(() => setIsSearchFocused(false), 200);
                       }}
                       onKeyDown={handleSearchKeyDown}
@@ -545,7 +555,7 @@ export default function App() {
                   {/* Recent Searches Dropdown */}
                   <AnimatePresence>
                     {isSearchFocused && searchHistory.length > 0 && (
-                      <motion.div 
+                      <motion.div
                         initial={{ opacity: 0, y: -10, scale: 0.96 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: -10, scale: 0.96 }}
@@ -653,7 +663,7 @@ export default function App() {
 
           {/* Invisible backdrop to dismiss search on click */}
           {isSearchFocused && (
-            <div 
+            <div
               className="absolute inset-0 z-20 cursor-default"
               onMouseDown={() => {
                 setIsSearchFocused(false);
@@ -663,11 +673,9 @@ export default function App() {
           )}
 
           {/* Scrollable Main Content */}
-          <main 
-            ref={scrollWrapperRef} 
-            className={`flex-1 overflow-y-auto px-8 py-6 pb-36 relative z-10 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              isSearchFocused ? 'blur-[4px] opacity-40 scale-[0.99] pointer-events-none' : ''
-            }`}
+          <main
+            ref={scrollWrapperRef}
+            className="flex-1 overflow-y-auto px-8 py-6 pb-36 relative z-10 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
           >
             <div ref={scrollContentRef} className="w-full min-h-full relative">
               <Suspense fallback={

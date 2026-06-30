@@ -121,13 +121,16 @@ try {
   }
 }
 
+let saveTimeout = null;
 function saveJsonDb() {
   if (!useJsonFallback) return;
-  try {
-    fs.writeFileSync(jsonDbPath, JSON.stringify(jsonData, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to save JSON database:', err);
-  }
+  if (saveTimeout) clearTimeout(saveTimeout);
+  
+  saveTimeout = setTimeout(() => {
+    fs.writeFile(jsonDbPath, JSON.stringify(jsonData, null, 2), 'utf8', (err) => {
+      if (err) console.error('Failed to save JSON database:', err);
+    });
+  }, 150); // 150ms debounce
 }
 
 // Helper: Get artwork directory path
