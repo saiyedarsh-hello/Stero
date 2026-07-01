@@ -198,12 +198,7 @@ class Downloader {
       await this.initYTMusic();
       const res = await this.ytmusic.getUpNexts(videoId);
 
-      const mapped = (res || []).filter(r => {
-        if (!r.videoId) return false;
-        const title = (r.name || r.title || '').toLowerCase();
-        const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
-        return !excludeKeywords.some(keyword => title.includes(keyword));
-      }).map(r => {
+      const mapped = (res || []).map(r => {
         let thumb = r.thumbnail || null;
         if (r.thumbnails && r.thumbnails.length > 0) {
           thumb = r.thumbnails[r.thumbnails.length - 1].url;
@@ -232,6 +227,12 @@ class Downloader {
           coverUrl: thumb,
           thumbnail: thumb
         };
+      }).filter(r => {
+        if (!r.videoId) return false;
+        const title = r.title.toLowerCase();
+        const artist = r.artist.toLowerCase();
+        const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody', 'tribute band', 'cover band', 'karaoke version', 'orchestra version', 'aamaye biye', 'biye ki kari', 'tamil', 'telugu', 'bengali', 'malayalam', 'kannada', 'bhojpuri', 'marathi', 'gujarati', 'assamese', 'odia'];
+        return !excludeKeywords.some(keyword => title.includes(keyword) || artist.includes(keyword));
       });
 
       console.log(`[Recommendations] Fetched ${mapped.length} tracks for videoId: ${videoId}`);
@@ -246,32 +247,39 @@ class Downloader {
         const fallbackRes = await this.ytmusic.searchSongs(`${artistName} songs`);
         const items = fallbackRes ? fallbackRes.slice(0, 30) : [];
         
-        const mappedFallback = items.filter(r => {
-          if (!r.videoId || r.videoId === videoId) return false;
-          const title = (r.name || r.title || '').toLowerCase();
-          const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
-          return !excludeKeywords.some(keyword => title.includes(keyword));
-        }).map(r => {
+        const mappedFallback = items.map(r => {
           let thumb = r.thumbnail || null;
           if (r.thumbnails && r.thumbnails.length > 0) thumb = r.thumbnails[r.thumbnails.length - 1].url;
+          
+          let artistVal = 'Unknown Artist';
+          const rawArtist = r.artist || r.artists;
+          if (rawArtist) {
+            if (typeof rawArtist === 'string') {
+              artistVal = rawArtist;
+            } else if (Array.isArray(rawArtist)) {
+              artistVal = rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ');
+            } else if (typeof rawArtist === 'object') {
+              artistVal = rawArtist.name || 'Unknown Artist';
+            }
+          }
+
           return {
             videoId: r.videoId,
             title: r.name || r.title || 'Unknown Title',
-            artist: (() => {
-              const rawArtist = r.artist || r.artists;
-              if (rawArtist) {
-                if (typeof rawArtist === 'string') return rawArtist;
-                if (Array.isArray(rawArtist)) return rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ');
-                if (typeof rawArtist === 'object') return rawArtist.name || 'Unknown Artist';
-              }
-              return 'Unknown Artist';
-            })(),
+            artist: artistVal,
             album: 'Recommended (Fallback)',
-            duration: Math.floor(r.duration || 0),
+            duration: r.duration ? Math.floor(r.duration / 1000) : 0,
             coverUrl: thumb,
             thumbnail: thumb
           };
+        }).filter(r => {
+          if (!r.videoId || r.videoId === videoId) return false;
+          const title = r.title.toLowerCase();
+          const artist = r.artist.toLowerCase();
+          const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody', 'tribute band', 'cover band', 'karaoke version', 'orchestra version', 'aamaye biye', 'biye ki kari', 'tamil', 'telugu', 'bengali', 'malayalam', 'kannada', 'bhojpuri', 'marathi', 'gujarati', 'assamese', 'odia'];
+          return !excludeKeywords.some(keyword => title.includes(keyword) || artist.includes(keyword));
         });
+        
         return mappedFallback;
       } catch (fallbackErr) {
         return [];
@@ -326,6 +334,41 @@ class Downloader {
     }
   }
 
+  isOriginalArtist(artistName) {
+    if (!artistName) return false;
+    const name = artistName.toLowerCase();
+    const unoriginalKeywords = [
+      'tribute', 'cover', 'covers', 'karaoke', 'instrumental', 'piano', 'lullaby', 
+      'kids', 'tunes', 'orchestra', 'singalong', 'hits band', 'tribute band', 
+      'originally performed', 'in the style of', 'tribute project', 'fanmade', 'fan-made',
+      'various artists', 'various artist', 'various', 'compilation', 'soundtrack', 'soundtracks'
+    ];
+    return !unoriginalKeywords.some(kw => name.includes(kw));
+  }
+
+  isOriginalTitle(titleStr) {
+    if (!titleStr) return false;
+    const title = titleStr.toLowerCase();
+    const unoriginalKeywords = [
+      'tribute', 'karaoke', 'originally performed', 'in the style of', 'karaoke version',
+      'tribute version', 'piano cover', 'acoustic cover', 'instrumental cover', 'various artists',
+      'hits compilation', 'greatest hits compilation'
+    ];
+    return !unoriginalKeywords.some(kw => title.includes(kw));
+  }
+
+  normalizeHindiPhonetics(str) {
+    if (!str) return '';
+    return str.toLowerCase()
+      .replace(/aa/g, 'a')
+      .replace(/ee/g, 'i')
+      .replace(/oo/g, 'u')
+      .replace(/y/g, 'i')
+      .replace(/ae/g, 'e')
+      .replace(/h/g, '') // removes silent h
+      .replace(/[^a-z0-9]/g, '');
+  }
+
   async search(query) {
     try {
       const cacheKey = `song:${query.trim().toLowerCase()}`;
@@ -335,18 +378,81 @@ class Downloader {
       }
 
       await this.initYTMusic();
-      const res = await this.ytmusic.searchSongs(query);
-      const items = res ? res.slice(0, 35) : [];
+      const [songsRes, videosRes] = await Promise.all([
+        this.ytmusic.searchSongs(query).catch(e => {
+          console.warn('searchSongs failed:', e);
+          return [];
+        }),
+        this.ytmusic.searchVideos(query).catch(e => {
+          console.warn('searchVideos failed:', e);
+          return [];
+        })
+      ]);
+
+      const items = [];
+      const seenVideoIds = new Set();
+      const addItems = (list) => {
+        if (!Array.isArray(list)) return;
+        list.forEach(item => {
+          if (item && item.videoId && !seenVideoIds.has(item.videoId)) {
+            seenVideoIds.add(item.videoId);
+            items.push(item);
+          }
+        });
+      };
+
+      addItems(songsRes);
+      addItems(videosRes);
       
+      const queryLower = query.toLowerCase().trim();
+      const searchStopWords = new Set(['song', 'songs', 'music', 'track', 'tracks', 'video', 'audio', 'official', 'lyrics', 'lyric']);
+      let queryTerms = queryLower.split(/\s+/).filter(term => !searchStopWords.has(term));
+      if (queryTerms.length === 0) {
+        queryTerms = queryLower.split(/\s+/);
+      }
+
       const filtered = items.filter(r => {
         if (!r.videoId) return false;
+        
         const title = (r.name || r.title || '').toLowerCase();
-        const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
-        return !excludeKeywords.some(keyword => title.includes(keyword));
+        let artist = 'Unknown Artist';
+        const rawArtist = r.artist || r.artists;
+        if (rawArtist) {
+          if (Array.isArray(rawArtist)) {
+            artist = rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ').toLowerCase();
+          } else if (typeof rawArtist === 'object') {
+            artist = (rawArtist.name || 'Unknown').toLowerCase();
+          } else if (typeof rawArtist === 'string') {
+            artist = rawArtist.toLowerCase();
+          }
+        }
+
+        // 1. Basic original quality check
+        if (!this.isOriginalArtist(artist) || !this.isOriginalTitle(title)) {
+          return false;
+        }
+
+        // 2. Fuzzy match ratio algorithm with phonetic normalization:
+        const normArtist = this.normalizeHindiPhonetics(artist);
+        const normTitle = this.normalizeHindiPhonetics(title);
+        
+        const normQueryTerms = queryTerms.map(t => this.normalizeHindiPhonetics(t));
+        const matchingTerms = normQueryTerms.filter(term => 
+          normArtist.includes(term) || normTitle.includes(term)
+        );
+
+        const matchRatio = matchingTerms.length / normQueryTerms.length;
+        let matches = false;
+        if (normQueryTerms.length <= 2) {
+          matches = (matchRatio >= 0.99);
+        } else {
+          matches = (matchRatio >= 0.60);
+        }
+
+        return matches;
       });
 
       const mapped = filtered.slice(0, 20).map(r => {
-        // duration is in seconds from ytmusic-api
         const totalSeconds = Math.floor(r.duration || 0);
         const mins = Math.floor(totalSeconds / 60);
         const secs = totalSeconds % 60;
@@ -359,9 +465,19 @@ class Downloader {
 
         return {
           videoId: r.videoId,
-          title: r.name,
-          artist: Array.isArray(r.artist) ? r.artist.map(a => a.name).join(', ') : (r.artist ? r.artist.name : 'Unknown Artist'),
-          album: r.album ? r.album.name : 'YouTube Music',
+          title: r.name || r.title,
+          artist: (() => {
+            const rawArtist = r.artist || r.artists;
+            if (!rawArtist) return 'Unknown Artist';
+            if (Array.isArray(rawArtist)) {
+              return rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ');
+            }
+            if (typeof rawArtist === 'object') {
+              return rawArtist.name || 'Unknown Artist';
+            }
+            return String(rawArtist);
+          })(),
+          album: r.album ? (r.album.name || r.album) : 'YouTube Music',
           duration: durationStr,
           thumbnail: thumb
         };
@@ -387,24 +503,63 @@ class Downloader {
 
       await this.initYTMusic();
 
+      const queryLower = query.toLowerCase().trim();
+      const searchStopWords = new Set(['song', 'songs', 'music', 'track', 'tracks', 'video', 'audio', 'official', 'lyrics', 'lyric']);
+      let queryTerms = queryLower.split(/\s+/).filter(term => !searchStopWords.has(term));
+      if (queryTerms.length === 0) {
+        queryTerms = queryLower.split(/\s+/);
+      }
+
       // 1. Fetch matching songs to extract their original albums
       let songAlbums = [];
       try {
         const songs = await this.ytmusic.searchSongs(query);
         if (songs && songs.length > 0) {
-          songs.slice(0, 5).forEach(s => {
+          songs.slice(0, 10).forEach(s => {
             if (s.album && s.album.albumId) {
-              songAlbums.push({
-                id: s.album.albumId,
-                browseId: s.album.albumId,
-                title: s.album.name,
-                artist: s.artist?.name || 'Unknown Artist',
-                year: '',
-                coverUrl: Array.isArray(s.thumbnails) && s.thumbnails.length > 0
-                          ? s.thumbnails[s.thumbnails.length - 1].url
-                          : null,
-                type: 'album'
-              });
+              const albumTitle = s.album.name || '';
+              let albumArtist = 'Unknown Artist';
+              const rawSongArtist = s.artist || s.artists;
+              if (rawSongArtist) {
+                if (Array.isArray(rawSongArtist) && rawSongArtist.length > 0) {
+                  albumArtist = rawSongArtist[0].name || 'Unknown Artist';
+                } else if (typeof rawSongArtist === 'object') {
+                  albumArtist = rawSongArtist.name || 'Unknown Artist';
+                } else if (typeof rawSongArtist === 'string') {
+                  albumArtist = rawSongArtist;
+                }
+              }
+
+              if (this.isOriginalArtist(albumArtist) && this.isOriginalTitle(albumTitle)) {
+                const normArtist = this.normalizeHindiPhonetics(albumArtist);
+                const normTitle = this.normalizeHindiPhonetics(albumTitle);
+                
+                const normQueryTerms = queryTerms.map(t => this.normalizeHindiPhonetics(t));
+                const matchingTerms = normQueryTerms.filter(term => 
+                  normArtist.includes(term) || normTitle.includes(term)
+                );
+                const matchRatio = matchingTerms.length / normQueryTerms.length;
+                let matches = false;
+                if (normQueryTerms.length <= 2) {
+                  matches = (matchRatio >= 0.99);
+                } else {
+                  matches = (matchRatio >= 0.60);
+                }
+
+                if (matches) {
+                  songAlbums.push({
+                    id: s.album.albumId,
+                    browseId: s.album.albumId,
+                    title: albumTitle,
+                    artist: albumArtist,
+                    year: '',
+                    coverUrl: Array.isArray(s.thumbnails) && s.thumbnails.length > 0
+                              ? s.thumbnails[s.thumbnails.length - 1].url
+                              : null,
+                    type: 'album'
+                  });
+                }
+              }
             }
           });
         }
@@ -414,20 +569,61 @@ class Downloader {
 
       // 2. Fetch standard album results
       const res = await this.ytmusic.searchAlbums(query);
-      const items = res ? res.slice(0, 30) : [];
+      const items = res ? res.slice(0, 40) : [];
       
       const filtered = items.filter(r => {
         if (!r.albumId) return false;
-        const name = (r.name || '').toLowerCase();
-        const excludeKeywords = ['remix', 'cover', 'tribute', 'instrumental', 'karaoke', 'lofi', 'lo-fi', 'parody'];
-        return !excludeKeywords.some(keyword => name.includes(keyword));
+        
+        const title = (r.name || '').toLowerCase();
+        let artist = 'Unknown Artist';
+        const rawArtist = r.artist || r.artists;
+        if (rawArtist) {
+          if (Array.isArray(rawArtist)) {
+            artist = rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ').toLowerCase();
+          } else if (typeof rawArtist === 'object') {
+            artist = (rawArtist.name || 'Unknown').toLowerCase();
+          } else if (typeof rawArtist === 'string') {
+            artist = rawArtist.toLowerCase();
+          }
+        }
+
+        if (!this.isOriginalArtist(artist) || !this.isOriginalTitle(title)) {
+          return false;
+        }
+
+        const normArtist = this.normalizeHindiPhonetics(artist);
+        const normTitle = this.normalizeHindiPhonetics(title);
+
+        const normQueryTerms = queryTerms.map(t => this.normalizeHindiPhonetics(t));
+        const matchingTerms = normQueryTerms.filter(term => 
+          normArtist.includes(term) || normTitle.includes(term)
+        );
+        const matchRatio = matchingTerms.length / normQueryTerms.length;
+        let matches = false;
+        if (normQueryTerms.length <= 2) {
+          matches = (matchRatio >= 0.99);
+        } else {
+          matches = (matchRatio >= 0.60);
+        }
+
+        return matches;
       });
 
       const mapped = filtered.slice(0, 20).map(r => ({
         id: r.albumId,
         browseId: r.albumId,
         title: r.name,
-        artist: (r.artist && r.artist.name) ? r.artist.name : (typeof r.artist === 'string' ? r.artist : 'Unknown Artist'),
+        artist: (() => {
+          const rawArtist = r.artist || r.artists;
+          if (!rawArtist) return 'Unknown Artist';
+          if (Array.isArray(rawArtist)) {
+            return rawArtist.map(a => typeof a === 'string' ? a : (a.name || 'Unknown')).join(', ');
+          }
+          if (typeof rawArtist === 'object') {
+            return rawArtist.name || 'Unknown Artist';
+          }
+          return String(rawArtist);
+        })(),
         year: r.year || '',
         coverUrl: Array.isArray(r.thumbnails) && r.thumbnails.length > 0
                   ? r.thumbnails[r.thumbnails.length - 1].url
@@ -435,7 +631,6 @@ class Downloader {
         type: 'album'
       }));
 
-      // 3. Merge: place song-extracted albums at the top, then standard ones, removing duplicates
       const combined = [...songAlbums, ...mapped];
       const unique = Array.from(new Map(combined.map(a => [a.id, a])).values());
 

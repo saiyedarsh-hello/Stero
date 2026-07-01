@@ -370,6 +370,8 @@ export default function App() {
   useEffect(() => {
     if (activeView !== 'music') return;
 
+    let active = true;
+
     if (!searchQuery.trim()) {
       usePlayerStore.getState().setYtSearchResults(null);
       usePlayerStore.getState().setYtArtistSearchResults(null);
@@ -386,6 +388,8 @@ export default function App() {
           window.electron.ytSearchTrending(searchQuery, 'artist'),
           window.electron.ytSearchAlbums(searchQuery)
         ]);
+
+        if (!active) return;
 
         if (results && results.length > 0) {
           const mappedResults = results.map(r => ({
@@ -413,11 +417,16 @@ export default function App() {
           usePlayerStore.getState().setYtAlbumSearchResults([]);
         }
       } catch (err) {
-        console.error('Live search failed:', err);
+        if (active) {
+          console.error('Live search failed:', err);
+        }
       }
     }, 400); // 400ms debounce
 
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [searchQuery, activeView]);
 
   const handleSearchKeyDown = async (e) => {
@@ -522,7 +531,10 @@ export default function App() {
               {activeView !== 'visualizer' && (
                 <>
                   <button
-                    onClick={() => setActiveView('music')}
+                    onClick={() => {
+                      setActiveView('music');
+                      setSearchQuery('');
+                    }}
                     className={`p-2.5 rounded-full border border-white/10 transition-all duration-300 backdrop-blur-xl ${activeView === 'music' ? 'bg-white/10 text-white shadow-[0_0_15px_rgba(255,255,255,0.05)]' : 'bg-white/[0.03] text-gray-400 hover:bg-white/[0.08] hover:text-white'}`}
                     title="Home"
                   >

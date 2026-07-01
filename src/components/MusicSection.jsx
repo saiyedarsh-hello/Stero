@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
-import { ChevronLeft, ChevronRight, Play, Heart, Disc, Plus, Check, CloudDownload } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Heart, Disc, Plus, Check, CloudDownload, X } from 'lucide-react';
 import LanguageModal from './LanguageModal';
 import RetryImage from './RetryImage';
 
@@ -80,7 +80,8 @@ export default function MusicSection() {
     startDownload,
     setActiveView,
     viewYtAlbum,
-    ytAlbumSearchResults
+    ytAlbumSearchResults,
+    addToBlacklist
   } = usePlayerStore(useShallow(state => ({
     appSettings: state.appSettings,
     activeTrack: state.activeTrack,
@@ -109,7 +110,8 @@ export default function MusicSection() {
     startDownload: state.startDownload,
     setActiveView: state.setActiveView,
     viewYtAlbum: state.viewYtAlbum,
-    ytAlbumSearchResults: state.ytAlbumSearchResults
+    ytAlbumSearchResults: state.ytAlbumSearchResults,
+    addToBlacklist: state.addToBlacklist
   })));
 
   const [showLanguageModal, setShowLanguageModal] = useState(false);
@@ -190,11 +192,6 @@ export default function MusicSection() {
   let displayArtists = [];
   if (ytArtistSearchResults) {
     displayArtists = [...ytArtistSearchResults];
-    followedArtists.forEach(artist => {
-      if (!displayArtists.some(a => (a.id || a.browseId) === (artist.id || artist.browseId))) {
-        displayArtists.push(artist);
-      }
-    });
   } else {
     displayArtists = [...followedArtists];
     artists.forEach(artist => {
@@ -231,10 +228,10 @@ export default function MusicSection() {
 
       {/* 0.5 My Taste Row */}
       {myTaste && myTaste.length > 0 && !ytSearchResults && !ytArtistSearchResults && (
-        <section className="order-0 w-full mb-2">
+        <section className="order-0 w-full mb-2" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 150px' }}>
           <div className="flex items-center justify-between mb-3 px-4">
             <h2 className="text-sm font-bold text-white/50 uppercase tracking-widest">
-              My Taste
+              Recommended
             </h2>
             <div className="flex items-center gap-2">
               <button onClick={() => scrollContainer(myTasteScrollRef, 'left')} className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
@@ -246,7 +243,7 @@ export default function MusicSection() {
             </div>
           </div>
           <div ref={myTasteScrollRef} className="flex overflow-x-auto gap-4 pb-4 px-4 hide-scrollbar snap-x snap-mandatory">
-            {myTaste.slice(0, 10).map((song) => {
+            {myTaste.slice(0, 24).map((song) => {
               const dbSong = allSongs?.find(s => s.filepath === `yt-stream://${song.videoId}`);
               const isFav = dbSong?.favorite === 1;
               const isDownloaded = allSongs?.some(s => 
@@ -263,11 +260,11 @@ export default function MusicSection() {
                   key={song.videoId} 
                   onClick={() => playTrack(song, myTaste)}
                   onMouseEnter={() => preloadTrack(song)}
-                  className="flex-shrink-0 w-80 md:w-96 h-28 rounded-2xl overflow-hidden cursor-pointer group relative shadow-lg snap-start border border-white/5 bg-white/5 hover:bg-white/10 transition-colors flex"
+                  className="flex-shrink-0 w-80 md:w-96 h-28 rounded-2xl overflow-hidden cursor-pointer group relative shadow-lg snap-start border border-white/5 bg-white/5 hover:bg-white/10 transition-colors flex will-change-[background-color]"
                 >
                   {/* Backdrop artwork blur */}
                   <div className="absolute inset-0 z-0 opacity-20 group-hover:opacity-30 transition-opacity">
-                     <RetryImage src={getArtworkUrl(getMediumResUrl(song.coverUrl || song.thumbnail))} fallbackSrc={song.coverUrl || song.thumbnail} alt={song.title} className="w-full h-full object-cover blur-xl scale-125" />
+                     <RetryImage src={getArtworkUrl(getMediumResUrl(song.coverUrl || song.thumbnail))} fallbackSrc={song.coverUrl || song.thumbnail} alt={song.title} className="w-full h-full object-cover blur-xl scale-125 will-change-transform" />
                   </div>
                   
                   {/* Left Side: Artwork */}
@@ -323,6 +320,18 @@ export default function MusicSection() {
                             <CloudDownload size={14} />
                           </button>
                         )}
+
+                        {/* Do Not Recommend (Blacklist) */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addToBlacklist(song);
+                          }}
+                          className="text-white/30 hover:text-red-500 hover:scale-110 active:scale-95 transition-all ml-1"
+                          title="Do not recommend this song again"
+                        >
+                          <X size={13} strokeWidth={2.5} />
+                        </button>
                     </div>
                   </div>
                 </div>
@@ -333,7 +342,7 @@ export default function MusicSection() {
       )}
 
       {/* 1. Popular Artist Row */}
-      <section className="order-1">
+      <section className="order-1" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}>
         <div className="flex items-center justify-between mb-4 px-4">
           <h2 className="text-xl font-bold text-white tracking-tight">
             {ytArtistSearchResults ? 'Search Results (Artists)' : 'Popular Artist'}
@@ -349,12 +358,18 @@ export default function MusicSection() {
         </div>
         <div ref={artistScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
           {displayArtists.length === 0 ? (
-            Array.from({ length: 8 }).map((_, i) => (
-              <div key={`artist-skel-${i}`} className="flex flex-col items-center gap-3 flex-shrink-0">
-                <div className="w-24 h-24 rounded-full bg-white/5 animate-pulse" />
-                <div className="w-16 h-3 bg-white/5 rounded animate-pulse" />
-              </div>
-            ))
+            loading ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <div key={`artist-skel-${i}`} className="flex flex-col items-center gap-3 flex-shrink-0">
+                  <div className="w-24 h-24 rounded-full bg-white/5 animate-pulse" />
+                  <div className="w-16 h-3 bg-white/5 rounded animate-pulse" />
+                </div>
+              ))
+            ) : (
+              ytArtistSearchResults ? (
+                <div className="text-sm text-gray-500 px-4 py-4 w-full">No matching artists found.</div>
+              ) : null
+            )
           ) : (
             displayArtists.map((artist) => (
             <div 
@@ -374,7 +389,7 @@ export default function MusicSection() {
                 }
               }}
             >
-              <div className="w-24 h-24 rounded-full overflow-hidden border border-white/5 shadow-lg group-hover:scale-105 group-active:scale-95 transition-all duration-300 relative isolate">
+              <div className="w-24 h-24 rounded-full overflow-hidden border border-white/5 shadow-lg group-hover:scale-105 group-active:scale-95 transition-all duration-300 relative isolate will-change-transform">
                 {artist.imageUrl || artist.thumbnail ? (
                   <RetryImage src={getArtworkUrl(getThumbnailUrl(artist.imageUrl || artist.thumbnail))} alt={artist.name} loading="lazy" className="w-full h-full object-cover" />
                 ) : (
@@ -414,8 +429,8 @@ export default function MusicSection() {
       </section>
 
       {/* 1.5 Your Songs Row (Only visible if followed artists exist) */}
-      {followedArtistSongs && followedArtistSongs.length > 0 && (
-        <section className={ytSearchResults ? 'order-5' : 'order-2'}>
+      {followedArtistSongs && followedArtistSongs.length > 0 && !ytSearchResults && (
+        <section className={ytSearchResults ? 'order-5' : 'order-2'} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 300px' }}>
           <div className="flex items-center justify-between mb-4 px-4">
             <h2 className="text-xl font-bold text-white tracking-tight">Your Songs</h2>
             <div className="flex items-center gap-2">
@@ -458,7 +473,7 @@ export default function MusicSection() {
                     onMouseEnter={() => preloadTrack(song)}
                     className="flex flex-col gap-3 flex-shrink-0 w-44 cursor-pointer group hover:z-10"
                   >
-                    <div className="w-44 h-56 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate">
+                    <div className="w-44 h-56 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate will-change-transform">
                       {(song.coverUrl || song.thumbnail) ? (
                         <RetryImage src={getArtworkUrl(getMediumResUrl(song.coverUrl || song.thumbnail))} fallbackSrc={song.coverUrl || song.thumbnail} alt={song.title} loading="lazy" className="w-full h-full object-cover" />
                       ) : (
@@ -520,8 +535,8 @@ export default function MusicSection() {
       )}
 
       {/* 1.6 Your Albums Row (Only visible if followed artist albums exist) */}
-      {followedArtistAlbums && followedArtistAlbums.length > 0 && (
-        <section className={ytSearchResults ? 'order-6' : 'order-3'}>
+      {followedArtistAlbums && followedArtistAlbums.length > 0 && !ytSearchResults && (
+        <section className={ytSearchResults ? 'order-6' : 'order-3'} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 260px' }}>
           <div className="flex items-center justify-between mb-4 px-4">
             <h2 className="text-xl font-bold text-white tracking-tight">Your Albums</h2>
             <div className="flex items-center gap-2">
@@ -540,7 +555,7 @@ export default function MusicSection() {
                 onClick={() => viewYtAlbum(album.id, album.title)}
                 className="flex flex-col gap-3 flex-shrink-0 w-44 cursor-pointer group hover:z-10"
               >
-                <div className="w-44 h-44 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate">
+                <div className="w-44 h-44 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate will-change-transform">
                   {album.coverUrl ? (
                     <RetryImage src={getArtworkUrl(getMediumResUrl(album.coverUrl))} alt={album.title} loading="lazy" className="w-full h-full object-cover" />
                   ) : (
@@ -565,7 +580,7 @@ export default function MusicSection() {
       )}
 
       {/* 2. Trendy Songs Row */}
-      <section className={ytSearchResults ? 'order-2' : 'order-4'}>
+      <section className={ytSearchResults ? 'order-2' : 'order-4'} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 300px' }}>
         <div className="flex items-center justify-between mb-4 px-4">
           <h2 className="text-xl font-bold text-white tracking-tight">
             {ytSearchResults ? 'Search Results' : 'Trendy Songs'}
@@ -582,7 +597,7 @@ export default function MusicSection() {
           </div>
         </div>
         <div ref={songScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
-          {(!ytSearchResults && trendingSongs.length === 0) ? (
+          {loading ? (
             Array.from({ length: 5 }).map((_, i) => (
               <div key={`trend-skel-${i}`} className="flex flex-col gap-3 flex-shrink-0 w-44">
                 <div className="w-44 h-56 rounded-2xl bg-white/5 animate-pulse" />
@@ -592,6 +607,8 @@ export default function MusicSection() {
                 </div>
               </div>
             ))
+          ) : ytSearchResults && ytSearchResults.length === 0 ? (
+            <div className="text-sm text-gray-500 px-4 py-4 w-full">No matching songs found.</div>
           ) : (
             (ytSearchResults || trendingSongs).map((song) => {
               const dbSong = allSongs?.find(s => s.filepath === `yt-stream://${song.videoId}`);
@@ -612,7 +629,7 @@ export default function MusicSection() {
                   onMouseEnter={() => preloadTrack(song)}
                   className="flex flex-col gap-3 flex-shrink-0 w-44 cursor-pointer group hover:z-10"
                 >
-                  <div className="w-44 h-56 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate">
+                  <div className="w-44 h-56 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate will-change-transform">
                     {(song.coverUrl || song.thumbnail) ? (
                       <RetryImage src={getArtworkUrl(getMediumResUrl(song.coverUrl || song.thumbnail))} fallbackSrc={song.coverUrl || song.thumbnail} alt={song.title} loading="lazy" className="w-full h-full object-cover" />
                     ) : (
@@ -672,9 +689,8 @@ export default function MusicSection() {
         </div>
       </section>
 
-      {/* 2.5 Album Search Results */}
-      {ytAlbumSearchResults && ytAlbumSearchResults.length > 0 && (
-        <section className="order-3">
+      {ytAlbumSearchResults && (
+        <section className="order-3" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 260px' }}>
           <div className="flex items-center justify-between mb-4 px-4 mt-6">
             <h2 className="text-xl font-bold text-white tracking-tight">
               Albums
@@ -689,13 +705,28 @@ export default function MusicSection() {
             </div>
           </div>
           <div ref={searchAlbumScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
-            {ytAlbumSearchResults.map((album, i) => (
+            {ytAlbumSearchResults.length === 0 ? (
+              loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <div key={`album-skel-${i}`} className="flex flex-col gap-3 flex-shrink-0 w-44">
+                    <div className="w-44 h-44 rounded-2xl bg-white/5 animate-pulse" />
+                    <div className="flex flex-col gap-2 px-1">
+                      <div className="w-3/4 h-4 bg-white/5 rounded animate-pulse" />
+                      <div className="w-1/2 h-3 bg-white/5 rounded animate-pulse" />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-gray-500 px-4 py-4 w-full">No matching albums found.</div>
+              )
+            ) : (
+              ytAlbumSearchResults.map((album, i) => (
               <div 
                 key={album.id + '-' + i} 
                 onClick={() => viewYtAlbum(album.id, album.title)}
                 className="flex flex-col gap-3 flex-shrink-0 w-44 cursor-pointer group hover:z-10"
               >
-                <div className="w-44 h-44 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate">
+                <div className="w-44 h-44 rounded-2xl overflow-hidden border border-white/10 shadow-xl relative transition-transform duration-300 group-hover:-translate-y-2 group-active:scale-95 isolate will-change-transform">
                   {album.coverUrl ? (
                     <RetryImage src={getArtworkUrl(getMediumResUrl(album.coverUrl))} alt={album.title} loading="lazy" className="w-full h-full object-cover" />
                   ) : (
@@ -714,71 +745,73 @@ export default function MusicSection() {
                   <span className="text-xs text-gray-400 truncate">{album.artist} {album.year ? `• ${album.year}` : ''}</span>
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </section>
       )}
 
       {/* 3. Recently Played */}
-      <section className="order-7">
-        <div className="flex items-center justify-between mb-4 px-4">
-          <h2 className="text-xl font-bold text-white tracking-tight">Recently Played</h2>
-          <div className="flex items-center gap-2">
-            <button className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
-              <ChevronLeft size={16} />
-            </button>
-            <button className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
-              <ChevronRight size={16} />
-            </button>
+      {!ytSearchResults && (
+        <section className="order-7" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 300px' }}>
+          <div className="flex items-center justify-between mb-4 px-4">
+            <h2 className="text-xl font-bold text-white tracking-tight">Recently Played</h2>
+            <div className="flex items-center gap-2">
+              <button className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
+                <ChevronLeft size={16} />
+              </button>
+              <button className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
-        </div>
-        
-        {recentlyPlayed.length > 0 ? (
-          <div className="flex flex-col md:flex-row gap-6 px-4">
-            {/* Main Featured Card */}
-            <div 
-              onClick={() => playTrack(recentlyPlayed[0], recentlyPlayed)}
-              className="flex-shrink-0 w-full md:w-64 h-64 rounded-3xl overflow-hidden relative group cursor-pointer border border-white/10 shadow-2xl transition-transform duration-300 hover:scale-[1.02]"
-            >
-               <RetryImage src={recentlyPlayed[0].isStream ? getHighResUrl(recentlyPlayed[0].artwork_path || recentlyPlayed[0].coverUrl) : getMediaUrl(recentlyPlayed[0].artwork_path)} fallbackSrc={recentlyPlayed[0].artwork_path || recentlyPlayed[0].coverUrl} alt={recentlyPlayed[0].title} className="w-full h-full object-cover" />
-               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6">
-                 <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center mb-4 text-white group-hover:scale-110 transition-transform">
-                   <Play size={20} className="ml-1" fill="currentColor" />
+          
+          {recentlyPlayed.length > 0 ? (
+            <div className="flex flex-col md:flex-row gap-6 px-4">
+              {/* Main Featured Card */}
+              <div 
+                onClick={() => playTrack(recentlyPlayed[0], recentlyPlayed)}
+                className="flex-shrink-0 w-full md:w-64 h-64 rounded-3xl overflow-hidden relative group cursor-pointer border border-white/10 shadow-2xl transition-transform duration-300 hover:scale-[1.02] will-change-transform"
+              >
+                 <RetryImage src={recentlyPlayed[0].isStream ? getHighResUrl(recentlyPlayed[0].artwork_path || recentlyPlayed[0].coverUrl) : getMediaUrl(recentlyPlayed[0].artwork_path)} fallbackSrc={recentlyPlayed[0].artwork_path || recentlyPlayed[0].coverUrl} alt={recentlyPlayed[0].title} className="w-full h-full object-cover" />
+                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6">
+                   <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center mb-4 text-white group-hover:scale-110 transition-transform">
+                     <Play size={20} className="ml-1" fill="currentColor" />
+                   </div>
+                   <span className="text-lg font-bold text-white truncate">{recentlyPlayed[0].title}</span>
+                   <span className="text-sm text-gray-300 truncate">{recentlyPlayed[0].artist}</span>
                  </div>
-                 <span className="text-lg font-bold text-white truncate">{recentlyPlayed[0].title}</span>
-                 <span className="text-sm text-gray-300 truncate">{recentlyPlayed[0].artist}</span>
-               </div>
-            </div>
-
-            {/* List Cards */}
-            <div className="flex-1 flex flex-col gap-3">
-              {recentlyPlayed.slice(1, 4).map((song) => (
-                <div 
-                  key={song.id || song.videoId} 
-                  onClick={() => playTrack(song, recentlyPlayed)}
-                  className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl p-3 flex items-center gap-4 transition-colors cursor-pointer group"
-                >
-                  <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 relative">
-                    <RetryImage src={song.isStream ? getHighResUrl(song.artwork_path || song.coverUrl) : getMediaUrl(song.artwork_path)} fallbackSrc={song.artwork_path || song.coverUrl} alt={song.title} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                      <Play size={16} className="text-white ml-0.5" fill="currentColor" />
+              </div>
+  
+              {/* List Cards */}
+              <div className="flex-1 flex flex-col gap-3">
+                {recentlyPlayed.slice(1, 4).map((song) => (
+                  <div 
+                    key={song.id || song.videoId} 
+                    onClick={() => playTrack(song, recentlyPlayed)}
+                    className="bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl p-3 flex items-center gap-4 transition-colors cursor-pointer group"
+                  >
+                    <div className="w-14 h-14 rounded-full overflow-hidden flex-shrink-0 relative">
+                      <RetryImage src={song.isStream ? getHighResUrl(song.artwork_path || song.coverUrl) : getMediaUrl(song.artwork_path)} fallbackSrc={song.artwork_path || song.coverUrl} alt={song.title} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <Play size={16} className="text-white ml-0.5" fill="currentColor" />
+                      </div>
                     </div>
+                    <div className="flex-1 min-w-0 flex flex-col">
+                      <span className="text-xs text-gray-400 truncate">{song.artist}</span>
+                      <span className="text-sm font-bold text-white truncate">{song.title}</span>
+                    </div>
+                    <button className="w-10 h-10 flex items-center justify-center text-white/50 hover:text-white transition-colors transform active:scale-95 ml-4">
+                      <Play size={20} className="ml-0.5" fill="currentColor" />
+                    </button>
                   </div>
-                  <div className="flex-1 min-w-0 flex flex-col">
-                    <span className="text-xs text-gray-400 truncate">{song.artist}</span>
-                    <span className="text-sm font-bold text-white truncate">{song.title}</span>
-                  </div>
-                  <button className="w-10 h-10 flex items-center justify-center text-white/50 hover:text-white transition-colors transform active:scale-95 ml-4">
-                    <Play size={20} className="ml-0.5" fill="currentColor" />
-                  </button>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="text-sm text-gray-500 px-4">No recently played tracks found.</div>
-        )}
-      </section>
+          ) : (
+            <div className="text-sm text-gray-500 px-4">No recently played tracks found.</div>
+          )}
+        </section>
+      )}
 
     </div>
   );

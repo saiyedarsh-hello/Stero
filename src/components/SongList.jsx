@@ -209,47 +209,105 @@ export default function SongList() {
     const query = deferredSearchQuery.toLowerCase().trim();
     if (!query) return rawSongsList;
 
-    const searchTerms = query.split(/\s+/);
+    const searchStopWords = new Set(['song', 'songs', 'music', 'track', 'tracks', 'video', 'audio', 'official', 'lyrics', 'lyric']);
+    let queryTerms = query.split(/\s+/).filter(term => !searchStopWords.has(term));
+    if (queryTerms.length === 0) {
+      queryTerms = query.split(/\s+/);
+    }
 
     return rawSongsList.map(song => {
       const title = (song.title || '').toLowerCase();
       const artist = (song.artist || '').toLowerCase();
       const album = (song.album || '').toLowerCase();
 
-      let score = 0;
-      let matchesAll = true;
+      // Original quality check helpers
+      const isOriginalArtist = (artistName) => {
+        if (!artistName) return false;
+        const name = artistName.toLowerCase();
+        const unoriginalKeywords = [
+          'tribute', 'cover', 'covers', 'karaoke', 'instrumental', 'piano', 'lullaby', 
+          'kids', 'tunes', 'orchestra', 'singalong', 'hits band', 'tribute band', 
+          'originally performed', 'in the style of', 'tribute project', 'fanmade', 'fan-made'
+        ];
+        return !unoriginalKeywords.some(kw => name.includes(kw));
+      };
 
-      for (const term of searchTerms) {
-        let termMatched = false;
-        
-        // Title matching
-        if (title === term) { score += 100; termMatched = true; }
-        else if (title.startsWith(term)) { score += 50; termMatched = true; }
-        else if (title.includes(term)) { score += 10; termMatched = true; }
-        
-        // Artist matching
-        if (!termMatched) {
-          if (artist === term) { score += 80; termMatched = true; }
-          else if (artist.startsWith(term)) { score += 40; termMatched = true; }
-          else if (artist.includes(term)) { score += 8; termMatched = true; }
-        }
-        
-        // Album matching
-        if (!termMatched) {
-          if (album === term) { score += 60; termMatched = true; }
-          else if (album.startsWith(term)) { score += 30; termMatched = true; }
-          else if (album.includes(term)) { score += 6; termMatched = true; }
-        }
+      const isOriginalSong = (songTitle) => {
+        if (!songTitle) return false;
+        const t = songTitle.toLowerCase();
+        const unoriginalKeywords = [
+          'tribute', 'karaoke', 'originally performed', 'in the style of', 'karaoke version',
+          'tribute version', 'piano cover', 'acoustic cover', 'instrumental cover'
+        ];
+        return !unoriginalKeywords.some(kw => t.includes(kw));
+      };
 
-        if (!termMatched) {
-          matchesAll = false;
-          break;
-        }
+      if (!isOriginalArtist(artist) || !isOriginalSong(title)) {
+        return { song, score: -9999, matches: false };
       }
 
-      return { song, score, matchesAll };
+      // Check how terms map to artist vs title/album
+      const normalizeHindiPhonetics = (str) => {
+        if (!str) return '';
+        return str.toLowerCase()
+          .replace(/aa/g, 'a')
+          .replace(/ee/g, 'i')
+          .replace(/oo/g, 'u')
+          .replace(/y/g, 'i')
+          .replace(/ae/g, 'e')
+          .replace(/h/g, '')
+          .replace(/[^a-z0-9]/g, '');
+      };
+
+      const normArtist = normalizeHindiPhonetics(artist);
+      const normTitle = normalizeHindiPhonetics(title);
+      const normAlbum = normalizeHindiPhonetics(album);
+
+      const normQueryTerms = queryTerms.map(t => normalizeHindiPhonetics(t));
+      const matchingTerms = normQueryTerms.filter(term => 
+        normArtist.includes(term) || normTitle.includes(term) || normAlbum.includes(term)
+      );
+
+      const matchRatio = matchingTerms.length / normQueryTerms.length;
+      let matches = false;
+      if (normQueryTerms.length <= 2) {
+        matches = (matchRatio >= 0.99);
+      } else {
+        matches = (matchRatio >= 0.60);
+      }
+
+      let score = 0;
+      if (matches) {
+        
+        // Exact artist match bonus
+        if (queryTerms.every(term => normArtist.includes(normalizeHindiPhonetics(term)))) {
+          score += 200;
+        }
+        // Exact title match bonus
+        if (queryTerms.every(term => normTitle.includes(normalizeHindiPhonetics(term)))) {
+          score += 150;
+        }
+
+        // Standard scoring for order ranking
+        queryTerms.forEach(term => {
+          const normTerm = normalizeHindiPhonetics(term);
+          if (normTitle === normTerm) score += 100;
+          else if (normTitle.startsWith(normTerm)) score += 50;
+          else if (normTitle.includes(normTerm)) score += 10;
+
+          if (normArtist === normTerm) score += 80;
+          else if (normArtist.startsWith(normTerm)) score += 40;
+          else if (normArtist.includes(normTerm)) score += 8;
+
+          if (normAlbum === normTerm) score += 60;
+          else if (normAlbum.startsWith(normTerm)) score += 30;
+          else if (normAlbum.includes(normTerm)) score += 6;
+        });
+      }
+
+      return { song, score, matches };
     })
-    .filter(item => item.matchesAll)
+    .filter(item => item.matches)
     .sort((a, b) => b.score - a.score)
     .map(item => item.song);
   }, [rawSongsList, deferredSearchQuery]);

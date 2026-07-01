@@ -310,3 +310,53 @@ body {
   flex-shrink: 0;
   line-height: 1;
 }
+
+/* Custom Ribbed Glass Mesh Texture and Noise Visualizer */
+.ribbed-glass-texture {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.16) 0%,
+    rgba(255, 255, 255, 0.05) 12%,
+    transparent 30%,
+    rgba(0, 0, 0, 0.15) 75%,
+    rgba(0, 0, 0, 0.5) 95%,
+    rgba(0, 0, 0, 0.65) 100%
+  );
+  background-size: 38px 100%;
+  background-repeat: repeat-x;
+  mix-blend-mode: overlay;
+  filter: url(#glass-ripple);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.95;
+}
+
+.visualizer-noise {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.085'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes mesh-drift {
+  0% {
+    transform: scale(1.3) translate(0px, 0px) rotate(0deg);
+  }
+  33% {
+    transform: scale(1.4) translate(20px, -15px) rotate(2deg);
+  }
+  66% {
+    transform: scale(1.35) translate(-15px, 25px) rotate(-2deg);
+  }
+  100% {
+    transform: scale(1.3) translate(0px, 0px) rotate(0deg);
+  }
+}
+
+.animate-mesh-drift {
+  animation: mesh-drift 22s infinite ease-in-out;
+}

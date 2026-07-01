@@ -73,6 +73,24 @@ const MOCK_PLAYLISTS = [
   { id: 102, name: 'Coding Focus', created_at: Date.now(), songIds: [1003, 1004] }
 ];
 
+const isSameTrack = (t1, t2) => {
+  if (!t1 || !t2) return false;
+  if (t1.id === t2.id) return true;
+  
+  const getVId = (t) => {
+    if (t.videoId) return t.videoId;
+    if (typeof t.id === 'string' && !t.id.includes('/') && t.id.length === 11) return t.id;
+    if (t.filepath && t.filepath.startsWith('yt-stream://')) {
+      return t.filepath.replace('yt-stream://', '');
+    }
+    return null;
+  };
+  
+  const v1 = getVId(t1);
+  const v2 = getVId(t2);
+  return v1 && v2 && v1 === v2;
+};
+
 export const usePlayerStore = create((set, get) => ({
   // Library Data
   songs: [],
@@ -111,6 +129,7 @@ export const usePlayerStore = create((set, get) => ({
   followedArtists: [],
   followedArtistSongs: [],
   followedArtistAlbums: [],
+  blacklistedSongs: JSON.parse(localStorage.getItem('stero-blacklisted-songs') || '[]'),
   
   // Navigation & View
   activeView: 'music', // 'songs', 'favorites', 'playlist-detail', 'album-detail', 'downloads'
@@ -240,93 +259,397 @@ export const usePlayerStore = create((set, get) => ({
     if (!window.electron) return [];
     const state = get();
     
-    // 1. Gather all songs, and find frequently played / favorite ones
+    // Stopwords for title keyword matching
+    const stopWords = new Set([
+      'the', 'a', 'an', 'and', 'or', 'but', 'for', 'nor', 'so', 'yet',
+      'at', 'by', 'from', 'in', 'into', 'of', 'off', 'on', 'onto', 'out', 'over', 'to', 'up', 'with',
+      'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+      'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your',
+      'his', 'its', 'our', 'their', 'this', 'that', 'these', 'those', 'song', 'music', 'video', 'audio',
+      'official', 'lyrics', 'lyric', 'feat', 'ft', 'prod', 'remix', 'mix', 'cover', 'live'
+    ]);
+
+    // 1. Gather all local songs and statistics
     const localSongs = state.songs || [];
-    const frequentSongs = localSongs
-      .filter(s => s.play_count && s.play_count > 0)
-      .sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
-    
-    const favoriteSongs = localSongs.filter(s => s.favorite === 1);
-    
-    // Combine to get seed tracks (favorites first, then top played)
-    const seedTracks = [];
-    const seedIds = new Set();
-    
-    favoriteSongs.forEach(s => {
-      const id = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null) || s.id;
-      if (id && !seedIds.has(id)) {
-        seedTracks.push(s);
-        seedIds.add(id);
+    const playHistory = state.playHistory || [];
+    const followedArtists = state.followedArtists || [];
+
+    // Helper to identify if a song is an online stream track
+    const checkIsStream = (s) => {
+      return !!(
+        s.isStream || 
+        s.videoId || 
+        (s.filepath && s.filepath.startsWith('yt-stream://'))
+      );
+    };
+
+    // Calculate preference score for each song
+    const scoredSongs = localSongs.map(s => {
+      const isStream = checkIsStream(s);
+      
+      // Base score = (favorite status * 20) + (play count * 5)
+      let baseScore = (s.favorite === 1 ? 20 : 0) + (s.play_count || 0) * 5;
+      
+      // Triple the preference weight if the song is from online streaming history
+      let songScore = isStream ? baseScore * 3.0 : baseScore;
+
+      // Add small baseline score so we can still use it if it has positive indicators
+      if (s.favorite === 1 || (s.play_count && s.play_count > 0)) {
+        songScore += 1.0;
+      }
+      
+      return { song: s, score: songScore, isStream };
+    });
+
+    // Boost scores based on recency in playHistory
+    // Stream songs get 3x recency boost
+    playHistory.forEach((track, index) => {
+      const recencyWeight = (20 - index) * 0.75;
+      const isStream = checkIsStream(track);
+      const finalBoost = isStream ? recencyWeight * 3.0 : recencyWeight;
+
+      const match = scoredSongs.find(entry => 
+        entry.song.id === track.id || 
+        (entry.song.videoId && track.videoId && entry.song.videoId === track.videoId)
+      );
+
+      if (match) {
+        match.score += finalBoost;
       }
     });
 
-    frequentSongs.forEach(s => {
-      const id = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null) || s.id;
-      if (id && !seedIds.has(id)) {
-        seedTracks.push(s);
-        seedIds.add(id);
+    // 2. Build preferences profile: artist scores, genre scores, title keywords
+    const artistScores = {};
+    const genreScores = {};
+    const titleKeywords = {};
+
+    // Seed artists from followedArtists first (lower base score to prioritize actual play history)
+    followedArtists.forEach(artist => {
+      const name = (artist.name || artist).trim().toLowerCase();
+      if (name) {
+        artistScores[name] = (artistScores[name] || 0) + 4.0;
       }
     });
 
-    // Select up to 4 seed tracks randomly from the top 10
-    const chosenSeeds = seedTracks.slice(0, 10).sort(() => 0.5 - Math.random()).slice(0, 4);
-    
-    let recommendationSongs = [];
-    
-    // 2. Fetch recommendations for these seeds
-    if (chosenSeeds.length > 0) {
-      try {
-        const promises = chosenSeeds.map(async (track) => {
-          const vId = track.videoId || (track.filepath && track.filepath.startsWith('yt-stream://') ? track.filepath.replace('yt-stream://', '') : null);
-          if (vId && window.electron.ytGetRecommendations) {
-            // High-precision recommendations based on a YouTube stream
-            return await window.electron.ytGetRecommendations(vId);
-          } else if (track.artist) {
-            // Fallback: search for trending songs by this artist
-            const primaryArtist = track.artist.split(',')[0].trim();
-            if (primaryArtist && primaryArtist.toLowerCase() !== 'unknown' && primaryArtist.toLowerCase() !== 'unknown artist') {
-              return await window.electron.ytSearchTrending(`${primaryArtist} songs`, 'song');
-            }
+    scoredSongs.forEach(entry => {
+      const { song, score } = entry;
+      if (score <= 0) return;
+
+      // Artist preferences
+      if (song.artist && song.artist.toLowerCase() !== 'unknown' && song.artist.toLowerCase() !== 'unknown artist') {
+        // Split by common delimiters (e.g. "Ed Sheeran, Taylor Swift" or "A & B")
+        const artists = song.artist.split(/[,&;]|\bfeat\b|\bft\b/i);
+        artists.forEach(a => {
+          const name = a.trim().toLowerCase();
+          if (name && name !== 'unknown' && name !== 'unknown artist') {
+            artistScores[name] = (artistScores[name] || 0) + score;
           }
-          return [];
         });
-        
-        const results = await Promise.all(promises);
+      }
+
+      // Genre preferences
+      if (song.genre && song.genre.toLowerCase() !== 'unknown' && song.genre.toLowerCase() !== 'unknown genre') {
+        const genres = song.genre.split(/[,&;/]/);
+        genres.forEach(g => {
+          const name = g.trim().toLowerCase();
+          if (name && name !== 'unknown' && name !== 'unknown genre') {
+            genreScores[name] = (genreScores[name] || 0) + score;
+          }
+        });
+      }
+
+      // Title keywords (only from high score tracks)
+      if (score >= 5 && song.title) {
+        const words = song.title.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
+        words.forEach(w => {
+          if (w.length > 2 && !stopWords.has(w)) {
+            titleKeywords[w] = (titleKeywords[w] || 0) + 1.0;
+          }
+        });
+      }
+    });
+
+    // Select Seeds
+    // Sort songs, artists, genres by score descending
+    const sortedScoredSongs = [...scoredSongs].sort((a, b) => b.score - a.score);
+    const sortedArtists = Object.entries(artistScores).sort((a, b) => b[1] - a[1]);
+    const sortedGenres = Object.entries(genreScores).sort((a, b) => b[1] - a[1]);
+
+    const seedSongs = sortedScoredSongs.slice(0, 10).map(entry => entry.song);
+    const seedArtists = sortedArtists.slice(0, 5).map(entry => entry[0]);
+    const seedGenres = sortedGenres.slice(0, 5).map(entry => entry[0]);
+
+    // Choose top 6 seed songs (biasing towards stream tracks)
+    const streamSeeds = seedSongs.filter(checkIsStream);
+    const localSeeds = seedSongs.filter(s => !checkIsStream(s));
+    const chosenSeeds = [...streamSeeds, ...localSeeds].slice(0, 6);
+
+    // 3. Multi-Channel Candidate Generation (parallel fetching)
+    const candidatePool = [];
+    const candidateIds = new Set();
+    const fetchPromises = [];
+
+    // Channel 1: Recommendations based on top seed songs
+    chosenSeeds.forEach(seed => {
+      const vId = seed.videoId || (seed.filepath && seed.filepath.startsWith('yt-stream://') ? seed.filepath.replace('yt-stream://', '') : null);
+      if (vId && window.electron.ytGetRecommendations) {
+        fetchPromises.push(
+          window.electron.ytGetRecommendations(vId)
+            .then(res => (res || []).map(track => ({ ...track, source: 'upnext', seedId: vId })))
+            .catch(() => [])
+        );
+      } else if (seed.artist) {
+        const primaryArtist = seed.artist.split(/[,&;]/)[0].trim();
+        if (primaryArtist && primaryArtist.toLowerCase() !== 'unknown') {
+          fetchPromises.push(
+            window.electron.ytSearchTrending(`${primaryArtist} songs`, 'song')
+              .then(res => (res || []).map(track => ({ ...track, source: 'artist_trending', seedArtist: primaryArtist })))
+              .catch(() => [])
+          );
+        }
+      }
+    });
+
+    // Channel 2: Search popular tracks for top 2 seed artists
+    seedArtists.slice(0, 2).forEach(artist => {
+      fetchPromises.push(
+        window.electron.ytSearchTrending(`${artist} songs`, 'song')
+          .then(res => (res || []).map(track => ({ ...track, source: 'artist_radio', seedArtist: artist })))
+          .catch(() => [])
+      );
+    });
+
+    // Channel 3: Search popular tracks for top 2 seed genres
+    seedGenres.slice(0, 2).forEach(genre => {
+      fetchPromises.push(
+        window.electron.ytSearchTrending(`top ${genre} songs`, 'song')
+          .then(res => (res || []).map(track => ({ ...track, source: 'genre_radio', seedGenre: genre })))
+          .catch(() => [])
+      );
+    });
+
+    // Run parallel fetches
+    if (fetchPromises.length > 0) {
+      try {
+        const results = await Promise.all(fetchPromises);
         results.forEach(res => {
           if (Array.isArray(res)) {
-            recommendationSongs = recommendationSongs.concat(res);
+            res.forEach(track => {
+              const id = track.videoId || track.id;
+              if (id && !candidateIds.has(id)) {
+                candidatePool.push(track);
+                candidateIds.add(id);
+              }
+            });
           }
         });
       } catch (err) {
-        console.error('Failed to fetch high-precision recommendations for My Taste:', err);
+        console.error('Failed fetching multi-channel recommendations:', err);
       }
     }
 
-    // 3. Fallback to general hits if we got nothing
-    if (recommendationSongs.length === 0) {
+    // Channel 4: Fallback to general language hits if pool is empty or too small
+    if (candidatePool.length < 15) {
       try {
-        const query = `${language} hit songs`;
-        recommendationSongs = await window.electron.ytSearchTrending(query, 'song') || [];
+        const query = `${language || 'popular'} hit songs`;
+        const fallbacks = await window.electron.ytSearchTrending(query, 'song') || [];
+        fallbacks.forEach(track => {
+          const id = track.videoId || track.id;
+          if (id && !candidateIds.has(id)) {
+            candidatePool.push({ ...track, source: 'fallback' });
+            candidateIds.add(id);
+          }
+        });
       } catch (err) {
-        console.error('Failed to fetch fallback trending songs:', err);
+        console.error('Failed fetching fallback recommendations:', err);
       }
     }
 
-    // 4. Client-side original song filter (double safety check)
-    const excludeKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
-    const filteredRecs = recommendationSongs.filter(r => {
-      const title = (r.title || r.name || '').toLowerCase();
-      return !excludeKeywords.some(keyword => title.includes(keyword));
-    });
-
-    // Remove duplicates
-    const uniqueRecommendations = Array.from(
-      new Map(filteredRecs.map(s => [s.videoId || s.id, s])).values()
+    // 4. Client-side Candidate Relevance Scoring
+    const libraryVideoIds = new Set(
+      localSongs
+        .map(s => s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null))
+        .filter(Boolean)
+    );
+    const librarySongKeys = new Set(
+      localSongs.map(s => `${(s.title || '').trim().toLowerCase()}|${(s.artist || '').trim().toLowerCase()}`)
     );
 
-    // 5. Mix in user's frequently played tracks
-    const frequentMix = frequentSongs.slice(0, 10).map(s => {
-      const vId = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null);
+    const scoredCandidates = candidatePool.map(c => {
+      const vId = c.videoId || c.id;
+      const title = (c.title || c.name || '').toLowerCase();
+      const artistStr = (c.artist || '').toLowerCase();
+      const matchKey = `${(c.title || c.name || '').trim().toLowerCase()}|${(c.artist || '').trim().toLowerCase()}`;
+
+      // Exclude if already in local library to focus on discovery (unless it's played a lot and we specifically want to recommend it, but we handle familiar mix separately)
+      if (libraryVideoIds.has(vId) || librarySongKeys.has(matchKey)) {
+        return { track: c, relevanceScore: -9999 };
+      }
+
+      // Exclude regional non-preferred language matches to keep preferences to Hindi and English
+      const regionalKeywords = ['tamil', 'telugu', 'bengali', 'malayalam', 'kannada', 'bhojpuri', 'marathi', 'gujarati', 'assamese', 'odia', 'aamaye biye', 'biye ki kari'];
+      if (regionalKeywords.some(kw => title.includes(kw) || artistStr.includes(kw))) {
+        return { track: c, relevanceScore: -9999 };
+      }
+
+      // Exclude blacklisted songs (do not recommend)
+      const isBlacklisted = get().blacklistedSongs.some(b => {
+        if (vId && b.videoId && vId === b.videoId) return true;
+        const t = (c.title || c.name || '').trim().toLowerCase();
+        const a = (c.artist || '').trim().toLowerCase();
+        if (t && a && b.title && b.artist && 
+            t === b.title.trim().toLowerCase() && 
+            a === b.artist.trim().toLowerCase()) return true;
+        return false;
+      });
+      if (isBlacklisted) {
+        return { track: c, relevanceScore: -9999 };
+      }
+
+      let relevance = 0;
+
+      // Match Artist preference
+      const candArtists = artistStr.split(/[,&;]|\bfeat\b|\bft\b/i).map(a => a.trim());
+      candArtists.forEach(candArt => {
+        if (!candArt) return;
+        
+        // Exact match
+        if (artistScores[candArt]) {
+          relevance += artistScores[candArt] * 2.5;
+        } else {
+          // Partial matches
+          Object.entries(artistScores).forEach(([userArt, userArtScore]) => {
+            if (candArt.includes(userArt) || userArt.includes(candArt)) {
+              relevance += userArtScore * 1.5;
+            }
+          });
+        }
+      });
+
+      // Match Genre preference
+      if (c.genre) {
+        const candGenres = c.genre.split(/[,&;/]/).map(g => g.trim().toLowerCase());
+        candGenres.forEach(candGen => {
+          if (genreScores[candGen]) {
+            relevance += genreScores[candGen] * 1.5;
+          }
+        });
+      }
+
+      // Title genre search
+      Object.entries(genreScores).forEach(([userGen, userGenScore]) => {
+        if (title.includes(userGen)) {
+          relevance += userGenScore * 0.5;
+        }
+      });
+
+      // Title Keywords overlap
+      const titleWords = title.replace(/[^\w\s]/g, '').split(/\s+/);
+      titleWords.forEach(word => {
+        if (titleKeywords[word]) {
+          relevance += titleKeywords[word] * 1.5;
+        }
+      });
+
+      // Boost direct UpNext recommendations proportionally to the seed song's preference score!
+      if (c.source === 'upnext' && c.seedId) {
+        const seedEntry = scoredSongs.find(entry => 
+          entry.song.id === c.seedId || 
+          (entry.song.videoId && entry.song.videoId === c.seedId)
+        );
+        if (seedEntry) {
+          relevance += seedEntry.score * 5.0; // Boost proportional to user plays/favorites
+        } else {
+          relevance += 12.0;
+        }
+      }
+
+      // Duration verification
+      if (c.duration) {
+        if (c.duration < 90 || c.duration > 480) {
+          relevance -= 15.0; // Penalize loops/effects
+        }
+      }
+
+      // Noise keyword clean filter
+      const noiseKeywords = ['remix', 'cover', 'live', 'lofi', 'lo-fi', 'instrumental', 'karaoke', 'slowed', 'reverb', 'speed up', 'sped up', '8d', 'tribute', 'parody'];
+      if (noiseKeywords.some(kw => title.includes(kw))) {
+        relevance -= 20.0;
+      }
+
+      return { track: c, relevanceScore: relevance };
+    });
+
+    // Filter valid discoveries and sort by relevance descending
+    const discoveries = scoredCandidates
+      .filter(entry => entry.relevanceScore > -100)
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .map(entry => {
+        const t = entry.track;
+        const vId = t.videoId || t.id;
+        return {
+          id: vId,
+          videoId: vId,
+          title: t.title || t.name,
+          artist: t.artist,
+          album: t.album || 'Recommended discovery',
+          coverUrl: t.coverUrl || t.thumbnail,
+          duration: t.duration || 0,
+          isStream: true,
+          filepath: `yt-stream://${vId}`,
+          favorite: 0,
+          play_count: 0
+        };
+      });
+
+    // Helper to check if a track is blacklisted
+    const isBlacklistedSong = (s) => {
+      const vId = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null) || s.id;
+      return get().blacklistedSongs.some(b => {
+        if (vId && b.videoId && vId === b.videoId) return true;
+        const t = (s.title || '').trim().toLowerCase();
+        const a = (s.artist || '').trim().toLowerCase();
+        if (t && a && b.title && b.artist && 
+            t === b.title.trim().toLowerCase() && 
+            a === b.artist.trim().toLowerCase()) return true;
+        return false;
+      });
+    };
+
+    // 5. Select Familiar Favorites (strongly biasing towards stream history)
+    const streamFavorites = scoredSongs
+      .filter(entry => entry.isStream && entry.score > 1.0 && !isBlacklistedSong(entry.song))
+      .map(entry => entry.song);
+
+    const localFavorites = scoredSongs
+      .filter(entry => !entry.isStream && entry.score > 1.0 && !isBlacklistedSong(entry.song))
+      .map(entry => entry.song);
+
+    // Combine favorites prioritizing stream history
+    const allFavorites = [...streamFavorites, ...localFavorites];
+    const familiarFavorites = allFavorites.slice(0, 12).sort(() => 0.5 - Math.random()).slice(0, 6);
+
+    // 6. Select Forgotten Gems
+    // Older tracks in library with moderate play counts (not the top 8)
+    const candidatesForForgotten = localSongs
+      .filter(s => {
+        // Exclude the top active favorites to prevent repetitive recommendations
+        const inTopFamiliar = familiarFavorites.some(f => f.id === s.id);
+        if (inTopFamiliar) return false;
+        
+        // Exclude blacklisted
+        if (isBlacklistedSong(s)) return false;
+        
+        return s.favorite === 1 || (s.play_count && s.play_count > 0);
+      })
+      // Sort by added_at (older first) or play_count ascending
+      .sort((a, b) => (a.added_at || 0) - (b.added_at || 0));
+    
+    const forgottenGems = candidatesForForgotten.slice(0, 15).sort(() => 0.5 - Math.random()).slice(0, 4);
+
+    // Map favorites and forgotten to standard structure
+    const mapToStandard = (s) => {
+      const vId = s.videoId || (s.filepath && s.filepath.startsWith('yt-stream://') ? s.filepath.replace('yt-stream://', '') : null) || s.id;
       return {
         id: s.id,
         videoId: vId,
@@ -337,15 +660,49 @@ export const usePlayerStore = create((set, get) => ({
         duration: s.duration || 0,
         filepath: s.filepath,
         favorite: s.favorite || 0,
-        play_count: s.play_count || 0
+        play_count: s.play_count || 0,
+        isStream: checkIsStream(s)
       };
-    });
+    };
 
-    // 6. Combine and shuffle
-    const combined = [...frequentMix, ...uniqueRecommendations];
-    const shuffled = combined.sort(() => 0.5 - Math.random());
+    const familiarMapped = familiarFavorites.map(mapToStandard);
+    const forgottenMapped = forgottenGems.map(mapToStandard);
+
+    // 7. Interleave Playlist Mix (20 discoveries + 6 familiar + 4 forgotten)
+    const discoveryMix = discoveries.slice(0, 20);
+    const finalPlaylist = [];
     
-    return shuffled.slice(0, 30);
+    let discIndex = 0;
+    let famIndex = 0;
+    let forgIndex = 0;
+
+    // Sequence loop (max 30 tracks)
+    for (let step = 0; step < 30; step++) {
+      // 1. Familiar Favorite first hook, then every 5 tracks
+      if ((step === 0 || step % 5 === 0) && famIndex < familiarMapped.length) {
+        finalPlaylist.push(familiarMapped[famIndex++]);
+      } 
+      // 2. Forgotten Gem every 7 tracks
+      else if (step % 7 === 0 && forgIndex < forgottenMapped.length) {
+        finalPlaylist.push(forgottenMapped[forgIndex++]);
+      } 
+      // 3. Otherwise Discovery
+      else if (discIndex < discoveryMix.length) {
+        finalPlaylist.push(discoveryMix[discIndex++]);
+      } 
+      // Fallback in case arrays empty
+      else if (famIndex < familiarMapped.length) {
+        finalPlaylist.push(familiarMapped[famIndex++]);
+      } else if (forgIndex < forgottenMapped.length) {
+        finalPlaylist.push(forgottenMapped[forgIndex++]);
+      } else {
+        break;
+      }
+    }
+
+    console.log(`[My Taste] Playlist generated with ${finalPlaylist.length} tracks (Discoveries: ${discIndex}, Familiar: ${famIndex}, Forgotten: ${forgIndex})`);
+    
+    return finalPlaylist;
   },
 
   fetchTrendingArtists: async (language) => {
@@ -561,6 +918,30 @@ export const usePlayerStore = create((set, get) => ({
     } catch (e) {
       console.warn('Failed to restore followed artists:', e);
     }
+  },
+
+  addToBlacklist: (song) => {
+    const vId = song.videoId || song.id;
+    if (!vId) return;
+    set(state => {
+      const exists = state.blacklistedSongs.some(b => b.videoId === vId || b.id === vId);
+      if (exists) return state;
+
+      const newBlacklist = [...state.blacklistedSongs, {
+        id: vId,
+        videoId: vId,
+        title: song.title,
+        artist: song.artist
+      }];
+      localStorage.setItem('stero-blacklisted-songs', JSON.stringify(newBlacklist));
+      
+      const newMyTaste = state.myTaste.filter(s => (s.videoId || s.id) !== vId);
+      
+      return { 
+        blacklistedSongs: newBlacklist,
+        myTaste: newMyTaste
+      };
+    });
   },
 
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -904,7 +1285,13 @@ export const usePlayerStore = create((set, get) => ({
   },
 
   fetchRecommendationsForTrack: async (track) => {
-    const videoId = track.videoId || track.id;
+    let videoId = track.videoId;
+    if (!videoId && typeof track.id === 'string' && track.id.length === 11 && !track.id.includes('/')) {
+      videoId = track.id;
+    }
+    if (!videoId && track.filepath && track.filepath.startsWith('yt-stream://')) {
+      videoId = track.filepath.replace('yt-stream://', '');
+    }
     if (!videoId || !window.electron || !window.electron.ytGetRecommendations) return;
     
     try {
@@ -924,15 +1311,57 @@ export const usePlayerStore = create((set, get) => ({
             })()
           };
         });
+
+        const regionalKeywords = ['tamil', 'telugu', 'bengali', 'malayalam', 'kannada', 'bhojpuri', 'marathi', 'gujarati', 'assamese', 'odia', 'aamaye biye', 'biye ki kari'];
+        const filteredRecs = mappedRecs.filter(r => {
+          const t = (r.title || '').toLowerCase();
+          const a = (r.artist || '').toLowerCase();
+          if (regionalKeywords.some(kw => t.includes(kw) || a.includes(kw))) return false;
+
+          // Exclude blacklisted songs
+          const isBlacklisted = get().blacklistedSongs.some(b => {
+            const vId = r.videoId || r.id;
+            if (vId && b.videoId && vId === b.videoId) return true;
+            const rt = (r.title || '').trim().toLowerCase();
+            const ra = (r.artist || '').trim().toLowerCase();
+            if (rt && ra && b.title && b.artist && 
+                rt === b.title.trim().toLowerCase() && 
+                ra === b.artist.trim().toLowerCase()) return true;
+            return false;
+          });
+          return !isBlacklisted;
+        });
+        
+        const playingArtist = (track.artist || '').toLowerCase().trim();
+        const followed = get().followedArtists.map(a => (a.name || a).toLowerCase().trim());
+        
+        const rankedRecs = filteredRecs.map(r => {
+          let score = 0;
+          const rArtist = (r.artist || '').toLowerCase().trim();
+          
+          // Boost same artist
+          if (playingArtist && (rArtist.includes(playingArtist) || playingArtist.includes(rArtist))) {
+            score += 100;
+          }
+          
+          // Boost followed artists
+          if (followed.some(f => rArtist.includes(f) || f.includes(rArtist))) {
+            score += 50;
+          }
+          
+          return { track: r, score };
+        })
+        .sort((a, b) => b.score - a.score)
+        .map(entry => entry.track);
         
         const currentActive = get().activeTrack;
-        if (currentActive && (currentActive.videoId === videoId || currentActive.id === videoId)) {
+        if (currentActive && isSameTrack(currentActive, track)) {
           set({
-            queue: [currentActive, ...mappedRecs],
-            originalQueue: [currentActive, ...mappedRecs],
+            queue: [currentActive, ...rankedRecs],
+            originalQueue: [currentActive, ...rankedRecs],
             queueIndex: 0
           });
-          console.log(`[Queue] Populated queue with ${mappedRecs.length} recommendations for: ${currentActive.title}`);
+          console.log(`[Queue] Populated queue with ${rankedRecs.length} ranked recommendations for: ${currentActive.title}`);
         }
       }
     } catch (err) {
@@ -969,7 +1398,7 @@ export const usePlayerStore = create((set, get) => ({
     const isMusicView = state.activeView === 'music';
 
     // 2. Instant Playback (Zero-Latency Start)
-    if (isStream && isMusicView && !resolvedPlaylistId) {
+    if (isStream && (isMusicView || state.activeView === 'visualizer') && !resolvedPlaylistId) {
        // Isolate the song and set active queue to just [track]
        list = [track];
        index = 0;
