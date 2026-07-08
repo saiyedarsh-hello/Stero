@@ -111,7 +111,7 @@ export default function CreateAlbumModal({ onClose }) {
     if (selectedIds.size === 0) { setError('Please select at least one song.'); return; }
     setError('');
     setSaving(true);
-    
+
     const finalSongIds = [];
     for (const id of selectedIds) {
       if (typeof id === 'string') {
@@ -141,12 +141,12 @@ export default function CreateAlbumModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center animate-fade-in px-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      
+
       <div className="bg-white/[0.02] backdrop-blur-[35px] border border-white/8 shadow-[15px_15px_40px_rgba(0,0,0,0.3)] rounded-2xl w-full max-w-2xl relative z-10 flex flex-col overflow-hidden max-h-[75vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
           <h2 className="text-lg font-bold text-white">Create Playlist</h2>
-          <button 
+          <button
             onClick={onClose}
             className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/5 transition-colors"
           >
@@ -156,7 +156,7 @@ export default function CreateAlbumModal({ onClose }) {
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-6 custom-scrollbar">
-          
+
           {/* Metadata Fields */}
           <div className="flex flex-col gap-4">
             <div>
@@ -170,7 +170,7 @@ export default function CreateAlbumModal({ onClose }) {
                 autoFocus
               />
             </div>
-            
+
             <div>
               <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wider">Cover Image URL (Optional)</label>
               <input
@@ -221,16 +221,14 @@ export default function CreateAlbumModal({ onClose }) {
                   const sId = song.id || song.videoId;
                   const isSelected = selectedIds.has(sId);
                   return (
-                    <div 
+                    <div
                       key={sId}
                       onClick={() => toggleSong(sId)}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${
-                        isSelected ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
-                      }`}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
+                        }`}
                     >
-                      <div className={`w-4 h-4 rounded-[4px] border flex items-center justify-center transition-colors flex-shrink-0 ${
-                        isSelected ? 'bg-white border-white text-black' : 'border-white/20'
-                      }`}>
+                      <div className={`w-4 h-4 rounded-[4px] border flex items-center justify-center transition-colors flex-shrink-0 ${isSelected ? 'bg-white border-white text-black' : 'border-white/20'
+                        }`}>
                         {isSelected && <Check size={10} strokeWidth={3} />}
                       </div>
                       <div className="flex flex-col min-w-0">

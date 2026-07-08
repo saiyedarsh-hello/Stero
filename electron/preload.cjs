@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('electron', {
   ytSearchTrending: (query, type) => ipcRenderer.invoke('yt-search-trending', query, type),
   ytSearchAlbums: (query) => ipcRenderer.invoke('yt-search-albums', query),
   ytGetArtistAlbums: (artistId) => ipcRenderer.invoke('yt-get-artist-albums', artistId),
+  ytGetArtistSongs: (artistId) => ipcRenderer.invoke('yt-get-artist-songs', artistId),
+  ytGetLyrics: (title, artist) => ipcRenderer.invoke('yt-get-lyrics', title, artist),
   ytGetAlbum: (browseId) => ipcRenderer.invoke('yt-get-album', browseId),
   ytGetStreamUrl: (videoId) => ipcRenderer.invoke('yt-get-stream-url', videoId),
   ytGetRecommendations: (videoId) => ipcRenderer.invoke('yt-get-recommendations', videoId),

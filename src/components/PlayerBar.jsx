@@ -3,22 +3,24 @@ import { usePlayerStore } from '../store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
 import RetryImage from './RetryImage';
 
-import { 
-  Play, 
-  Pause, 
-  SkipForward, 
-  SkipBack, 
-  Shuffle, 
-  Repeat, 
-  Volume2, 
-  VolumeX, 
+import {
+  Play,
+  Pause,
+  SkipForward,
+  SkipBack,
+  Shuffle,
+  Repeat,
+  Volume2,
+  VolumeX,
   Heart,
   Maximize2,
   Disc,
   Pencil,
   CloudDownload,
   ListPlus,
-  Check
+  Check,
+  ListMusic,
+  AlignLeft
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -91,7 +93,11 @@ export default function PlayerBar() {
     activePlaylistId,
     dominantColor,
     customAlbums,
-    addSongToCustomAlbum
+    addSongToCustomAlbum,
+    isQueueSidebarOpen,
+    toggleQueueSidebar,
+    isLyricsSidebarOpen,
+    toggleLyricsSidebar
   } = usePlayerStore(useShallow(state => ({
     activeTrack: state.activeTrack,
     isPlaying: state.isPlaying,
@@ -118,7 +124,11 @@ export default function PlayerBar() {
     activePlaylistId: state.activePlaylistId,
     dominantColor: state.dominantColor,
     customAlbums: state.customAlbums,
-    addSongToCustomAlbum: state.addSongToCustomAlbum
+    addSongToCustomAlbum: state.addSongToCustomAlbum,
+    isQueueSidebarOpen: state.isQueueSidebarOpen,
+    toggleQueueSidebar: state.toggleQueueSidebar,
+    isLyricsSidebarOpen: state.isLyricsSidebarOpen,
+    toggleLyricsSidebar: state.toggleLyricsSidebar
   })));
 
   const currentSong = activeTrack || {
@@ -134,6 +144,7 @@ export default function PlayerBar() {
   const dragTimeRef = useRef(0);
   const lastFilepathRef = useRef('');
   const lastSaveRef = useRef(0); // timestamp of last session save
+  const lastProgressUpdateRef = useRef(0); // timestamp of last progress state update
 
   const [duration, setDuration] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
@@ -200,7 +211,7 @@ export default function PlayerBar() {
   // Handle active track change and play/pause synchronization
   useEffect(() => {
     if (!audioRef.current) return;
-    
+
     if (activeTrack) {
       const trackSrc = getMediaUrl(activeTrack.filepath);
       // Only change src if the track has actually changed
@@ -214,13 +225,13 @@ export default function PlayerBar() {
         if (progressThumbRef.current) progressThumbRef.current.style.left = '0%';
         lastFilepathRef.current = activeTrack.filepath;
       }
-      
+
       if (isPlaying) {
         audioRef.current.play().catch((err) => {
           console.warn("Playback failed on play():", err);
           if ((activeTrack.isStream || activeTrack.filepath?.startsWith('yt-stream://')) && window.electron) {
             console.log("Attempting to refresh expired stream URL on play failure...");
-            window.electron.ytGetStreamUrl(activeTrack.id || activeTrack.videoId).then(result => {
+            window.electron.ytGetStreamUrl(activeTrack.videoId || activeTrack.id).then(result => {
               if (result && result.success && result.url) {
                 const currentPos = audioRef.current.currentTime || 0;
                 usePlayerStore.setState(state => ({
@@ -317,11 +328,11 @@ export default function PlayerBar() {
         const ct = audioRef.current.currentTime;
         let dur = duration || audioRef.current.duration;
         if (!dur || !isFinite(dur)) dur = usePlayerStore.getState().activeTrack?.duration || 0;
-        
+
         if (timeTextRef.current) {
           timeTextRef.current.innerText = formatTime(ct);
         }
-        
+
         if (progressBarFillRef.current && dur > 0) {
           const percent = (ct / dur) * 100;
           progressBarFillRef.current.style.width = `${percent}%`;
@@ -332,7 +343,14 @@ export default function PlayerBar() {
             progressGlowRef.current.style.width = `${percent}%`;
           }
         }
-        
+
+        // Update Zustand progress state (throttled to 80ms for accurate lyrics sync)
+        const progressNow = Date.now();
+        if (progressNow - lastProgressUpdateRef.current > 80) {
+          lastProgressUpdateRef.current = progressNow;
+          usePlayerStore.setState({ progress: ct });
+        }
+
         // Save session logic (throttled to 5 seconds)
         const now = Date.now();
         if (now - lastSaveRef.current > 5000 && activeTrack) {
@@ -376,7 +394,7 @@ export default function PlayerBar() {
   const handleEnded = () => {
     const state = usePlayerStore.getState();
     const { repeatMode, decrementRepeatMode, nextTrack } = state;
-    
+
     if (repeatMode > 0) {
       decrementRepeatMode();
       if (audioRef.current) {
@@ -398,14 +416,14 @@ export default function PlayerBar() {
     const width = rect.width;
     const percentage = Math.max(0, Math.min(1, clickX / width));
     const newTime = percentage * dur;
-    
+
     if (timeTextRef.current) timeTextRef.current.innerText = formatTime(newTime);
     if (progressBarFillRef.current) progressBarFillRef.current.style.width = `${percentage * 100}%`;
     if (progressThumbRef.current) progressThumbRef.current.style.left = `${percentage * 100}%`;
     if (progressGlowRef.current) progressGlowRef.current.style.width = `${percentage * 100}%`;
-    
+
     dragTimeRef.current = newTime;
-    
+
     if (updateAudio && audioRef.current && !isNaN(newTime)) {
       try {
         audioRef.current.currentTime = newTime;
@@ -421,7 +439,7 @@ export default function PlayerBar() {
     if (!audioRef.current || !dur) return;
     e.preventDefault();
     setIsSeeking(true);
-    
+
     const clientX = getClientX(e);
     updateSeekPosition(clientX, false); // Seek visually only
 
@@ -434,7 +452,7 @@ export default function PlayerBar() {
       document.removeEventListener('mouseup', handleMouseUp);
       document.removeEventListener('touchmove', handleMouseMove);
       document.removeEventListener('touchend', handleMouseUp);
-      
+
       try {
         if (audioRef.current && !isNaN(dragTimeRef.current)) {
           audioRef.current.currentTime = dragTimeRef.current;
@@ -466,7 +484,7 @@ export default function PlayerBar() {
   const handleVolumeMouseDown = (e) => {
     e.preventDefault();
     setIsDraggingVolume(true);
-    
+
     const clientX = getClientX(e);
     updateVolumePosition(clientX);
 
@@ -514,28 +532,28 @@ export default function PlayerBar() {
     console.error('Audio playback error:', e);
 
     const isStream = state.activeTrack.isStream || state.activeTrack.filepath?.startsWith('yt-stream://');
-    
+
     if (isStream && window.electron) {
-        console.log("Attempting to refresh expired stream URL on error event...");
-        window.electron.ytGetStreamUrl(state.activeTrack.id || state.activeTrack.videoId).then(result => {
-            if (result && result.success && result.url) {
-                const currentPos = audioRef.current.currentTime || 0;
-                usePlayerStore.setState(s => ({
-                  activeTrack: { ...s.activeTrack, filepath: result.url }
-                }));
-                setTimeout(() => {
-                  if (audioRef.current) {
-                    audioRef.current.currentTime = currentPos;
-                    if (usePlayerStore.getState().isPlaying) {
-                       audioRef.current.play().catch(err => console.error("Retry play failed:", err));
-                    }
-                  }
-                }, 100);
-            } else {
-                state.nextTrack();
+      console.log("Attempting to refresh expired stream URL on error event...");
+      window.electron.ytGetStreamUrl(state.activeTrack.id || state.activeTrack.videoId).then(result => {
+        if (result && result.success && result.url) {
+          const currentPos = audioRef.current.currentTime || 0;
+          usePlayerStore.setState(s => ({
+            activeTrack: { ...s.activeTrack, filepath: result.url }
+          }));
+          setTimeout(() => {
+            if (audioRef.current) {
+              audioRef.current.currentTime = currentPos;
+              if (usePlayerStore.getState().isPlaying) {
+                audioRef.current.play().catch(err => console.error("Retry play failed:", err));
+              }
             }
-        });
-        return;
+          }, 100);
+        } else {
+          state.nextTrack();
+        }
+      });
+      return;
     }
 
     // Debounce: prevent rapid auto-skipping if multiple tracks fail in a row
@@ -556,14 +574,13 @@ export default function PlayerBar() {
   };
 
   return (
-    <div 
+    <div
       onMouseEnter={() => isHoveringBarRef.current = true}
       onMouseLeave={() => isHoveringBarRef.current = false}
-      className={`absolute bottom-0 left-0 right-0 w-full rounded-t-3xl px-6 md:px-8 py-3.5 flex items-center justify-between gap-4 md:gap-6 z-50 select-none transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-      activeView === 'visualizer' ? 'opacity-0 pointer-events-none translate-y-12 scale-95' : 
-      isIdle ? 'opacity-0 pointer-events-none translate-y-full scale-95' : 'opacity-100 translate-y-0 scale-100'
-    }`}
-    style={{ backgroundColor: dominantColor ? `hsl(${dominantColor.h}, ${dominantColor.s}%, ${Math.max(40, dominantColor.l - 5)}%)` : '#FF4F6E' }}>
+      className={`absolute bottom-0 left-0 right-0 w-full rounded-t-3xl px-6 md:px-8 py-3.5 flex items-center justify-between gap-4 md:gap-6 z-50 select-none transition-all duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] ${activeView === 'visualizer' ? 'opacity-0 pointer-events-none translate-y-12 scale-95' :
+          isIdle ? 'opacity-0 pointer-events-none translate-y-full scale-95' : 'opacity-100 translate-y-0 scale-100'
+        }`}
+      style={{ backgroundColor: dominantColor ? `hsl(${dominantColor.h}, ${dominantColor.s}%, ${Math.max(40, dominantColor.l - 5)}%)` : '#FF4F6E' }}>
       <audio
         ref={audioRef}
         preload="auto"
@@ -576,13 +593,13 @@ export default function PlayerBar() {
 
       {/* Left section: Artwork + Song info + Favorite */}
       <div className="flex items-center gap-4 w-1/4 min-w-[220px]">
-        <div 
+        <div
           onClick={toggleVisualizer}
           className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex-shrink-0 cursor-pointer overflow-hidden relative group/art"
           title="Toggle Canvas Visualizer"
         >
           {currentSong.artwork_path || currentSong.coverUrl || currentSong.thumbnail ? (
-            <RetryImage 
+            <RetryImage
               src={getArtworkUrl(getHighResUrl(currentSong.artwork_path || currentSong.coverUrl || currentSong.thumbnail))}
               alt={currentSong.title}
               className="w-full h-full transition-transform duration-500 group-hover/art:scale-105"
@@ -598,12 +615,11 @@ export default function PlayerBar() {
           <span className="text-xs text-gray-400 truncate max-w-[150px] mt-0.5">{currentSong.artist}</span>
         </div>
         <div className="flex items-center gap-1 text-white/80 ml-2 flex-shrink-0">
-          <button 
+          <button
             onClick={() => activeTrack && toggleFavorite(activeTrack.id || activeTrack.videoId, undefined, activeTrack)}
             disabled={!activeTrack}
-            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-105 active:scale-95 transition-all ${
-              activeTrack?.favorite ? 'text-white' : 'text-white/80 hover:text-white'
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-105 active:scale-95 transition-all ${activeTrack?.favorite ? 'text-white' : 'text-white/80 hover:text-white'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
             title="Favorite"
           >
             <Heart size={15} fill={activeTrack?.favorite ? 'currentColor' : 'none'} />
@@ -618,6 +634,14 @@ export default function PlayerBar() {
               <CloudDownload size={14} />
             </button>
           )}
+          <button
+            onClick={toggleQueueSidebar}
+            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 transition-all active:scale-95 ${isQueueSidebarOpen ? 'text-white bg-white/20' : 'text-white/80 hover:text-white'
+              }`}
+            title="Queue"
+          >
+            <ListMusic size={14} />
+          </button>
         </div>
       </div>
 
@@ -627,9 +651,8 @@ export default function PlayerBar() {
         <div className="flex items-center gap-4">
           <button
             onClick={() => setShuffle(!shuffle)}
-            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 transition-all ${
-              shuffle ? 'text-white' : 'text-white/80 hover:text-white'
-            }`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 transition-all ${shuffle ? 'text-white' : 'text-white/80 hover:text-white'
+              }`}
             title="Shuffle"
           >
             <Shuffle size={14} />
@@ -667,9 +690,8 @@ export default function PlayerBar() {
 
           <button
             onClick={cycleRepeatMode}
-            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 transition-all relative ${
-              repeatMode > 0 ? 'text-white' : 'text-white/80 hover:text-white'
-            }`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 transition-all relative ${repeatMode > 0 ? 'text-white' : 'text-white/80 hover:text-white'
+              }`}
             title="Repeat"
           >
             <Repeat size={14} />
@@ -684,7 +706,7 @@ export default function PlayerBar() {
         {/* Timeline Seek bar */}
         <div className="flex items-center gap-3 w-full">
           <span ref={timeTextRef} className="font-display text-[10px] text-white/70 font-bold w-8 text-left">0:00</span>
-          <div 
+          <div
             ref={progressBarRef}
             onMouseDown={handleSeekMouseDown}
             onTouchStart={handleSeekMouseDown}
@@ -692,7 +714,7 @@ export default function PlayerBar() {
           >
             <div className="w-full h-1 bg-white/10 group-hover/seek:bg-white/20 transition-colors rounded-full relative">
               {/* Soft diffused glow layer under the progress fill */}
-              <div 
+              <div
                 ref={progressGlowRef}
                 className="progress-glow"
                 style={{
@@ -701,15 +723,14 @@ export default function PlayerBar() {
                     : 'rgba(255, 255, 255, 0.5)',
                 }}
               />
-              <div 
+              <div
                 ref={progressBarFillRef}
                 className="h-full bg-white/85 rounded-full absolute top-0 left-0"
               />
-              <div 
+              <div
                 ref={progressThumbRef}
-                className={`w-2.5 h-2.5 rounded-full bg-white absolute top-1/2 transition-all duration-150 ${
-                  isSeeking ? 'opacity-100 scale-110' : 'opacity-0 group-hover/seek:opacity-100'
-                }`}
+                className={`w-2.5 h-2.5 rounded-full bg-white absolute top-1/2 transition-all duration-150 ${isSeeking ? 'opacity-100 scale-110' : 'opacity-0 group-hover/seek:opacity-100'
+                  }`}
                 style={{
                   transform: 'translate(-50%, -50%)',
                   boxShadow: dominantColor
@@ -725,14 +746,24 @@ export default function PlayerBar() {
 
       {/* Right section: Volume + Visualizer Toggle */}
       <div className="w-1/4 min-w-[220px] flex items-center justify-end gap-4">
+        {/* Lyrics Button */}
+        <button
+          onClick={toggleLyricsSidebar}
+          disabled={!activeTrack}
+          className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 active:scale-95 transition-all ${isLyricsSidebarOpen ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'
+            } disabled:opacity-30 disabled:cursor-not-allowed`}
+          title="Lyrics"
+        >
+          <AlignLeft size={15} />
+        </button>
+
         {/* Playlist Menu Button & Popover */}
         <div className="relative flex items-center" ref={playlistMenuRef}>
-          <button 
+          <button
             onClick={() => setShowPlaylistMenu(!showPlaylistMenu)}
             disabled={!activeTrack}
-            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 active:scale-95 transition-all ${
-              showPlaylistMenu ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
+            className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 active:scale-95 transition-all ${showPlaylistMenu ? 'bg-white/20 text-white' : 'text-white/80 hover:text-white'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
             title="Add to Playlist"
           >
             <ListPlus size={15} />
@@ -740,7 +771,7 @@ export default function PlayerBar() {
 
           <AnimatePresence>
             {showPlaylistMenu && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -769,7 +800,7 @@ export default function PlayerBar() {
                   )}
                 </div>
                 <div className="p-2 border-t border-white/10 bg-white/[0.02]">
-                  <button 
+                  <button
                     onClick={() => {
                       setShowPlaylistMenu(false);
                       setActiveView('albums');
@@ -784,39 +815,37 @@ export default function PlayerBar() {
           </AnimatePresence>
         </div>
 
-        <button 
+        <button
           onClick={toggleVisualizer}
-          className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-105 active:scale-95 transition-all ${
-            activeView === 'visualizer' ? 'text-white' : 'text-white/80 hover:text-white'
-          }`}
+          className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-105 active:scale-95 transition-all ${activeView === 'visualizer' ? 'text-white' : 'text-white/80 hover:text-white'
+            }`}
           title="Canvas Visualizer"
         >
           <Maximize2 size={15} />
         </button>
 
         <div className="flex items-center gap-1.5">
-          <button 
+          <button
             onClick={() => setMuted(!muted)}
             className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 text-white/80 hover:text-white transition-all active:scale-95"
             title={muted ? "Unmute" : "Mute"}
           >
             {muted || volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
           </button>
-          <div 
+          <div
             ref={volumeBarRef}
             onMouseDown={handleVolumeMouseDown}
             onTouchStart={handleVolumeMouseDown}
             className="w-20 h-6 flex items-center cursor-pointer group/vol"
           >
             <div className="w-full h-1 bg-white/10 group-hover/vol:bg-white/20 transition-colors rounded-full relative">
-              <div 
+              <div
                 className="h-full bg-white/80 rounded-full absolute top-0 left-0"
                 style={{ width: `${muted ? 0 : volume * 100}%` }}
               />
-              <div 
-                className={`w-2.5 h-2.5 rounded-full bg-white shadow-md absolute top-1/2 transition-all duration-150 ${
-                  isDraggingVolume ? 'opacity-100 scale-110' : 'opacity-0 group-hover/vol:opacity-100'
-                }`}
+              <div
+                className={`w-2.5 h-2.5 rounded-full bg-white shadow-md absolute top-1/2 transition-all duration-150 ${isDraggingVolume ? 'opacity-100 scale-110' : 'opacity-0 group-hover/vol:opacity-100'
+                  }`}
                 style={{ left: `${muted ? 0 : volume * 100}%`, transform: 'translate(-50%, -50%)' }}
               />
             </div>

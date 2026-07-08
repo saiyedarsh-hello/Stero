@@ -2,14 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
 import { X, Search, Check } from 'lucide-react';
-import Lenis from 'lenis';
 
 export default function EditPlaylistModal({ playlist, onClose }) {
   const { songs, updateCustomAlbum } = usePlayerStore(useShallow(state => ({
     songs: state.songs,
     updateCustomAlbum: state.updateCustomAlbum
   })));
-  
+
   const [name, setName] = useState(playlist?.name || '');
   const [coverPath, setCoverPath] = useState(playlist?.cover_path || '');
   const [selectedSongIds, setSelectedSongIds] = useState(() => {
@@ -21,36 +20,10 @@ export default function EditPlaylistModal({ playlist, onClose }) {
   const listContentRef = useRef(null);
 
 
-  useEffect(() => {
-    if (!listWrapperRef.current || !listContentRef.current) return;
-    
-    const lenis = new Lenis({
-      wrapper: listWrapperRef.current,
-      content: listContentRef.current,
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      direction: 'vertical',
-      gestureDirection: 'vertical',
-      smooth: true,
-      mouseMultiplier: 1,
-      smoothTouch: false,
-      touchMultiplier: 2,
-    });
-    
-    function raf(time) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
-    const frameId = requestAnimationFrame(raf);
-
-    return () => {
-      cancelAnimationFrame(frameId);
-      lenis.destroy();
-    };
-  }, []);
+  // Lenis smooth scroll removed for performance optimization
 
   const toggleSong = (songId) => {
-    setSelectedSongIds(prev => 
+    setSelectedSongIds(prev =>
       prev.includes(songId) ? prev.filter(id => id !== songId) : [...prev, songId]
     );
   };
@@ -61,20 +34,20 @@ export default function EditPlaylistModal({ playlist, onClose }) {
     onClose();
   };
 
-  const filteredSongs = songs.filter(song => 
-    song.title?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+  const filteredSongs = songs.filter(song =>
+    song.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     song.artist?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center animate-fade-in px-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      
+
       <div className="bg-white/[0.02] backdrop-blur-[35px] border border-white/8 shadow-[15px_15px_40px_rgba(0,0,0,0.3)] rounded-2xl w-full max-w-2xl relative z-10 flex flex-col overflow-hidden max-h-[75vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
           <h2 className="text-lg font-bold text-white">Edit Playlist</h2>
-          <button 
+          <button
             onClick={onClose}
             className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-white/5 transition-colors"
           >
@@ -84,7 +57,7 @@ export default function EditPlaylistModal({ playlist, onClose }) {
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-6 custom-scrollbar">
-          
+
           {/* Metadata Fields */}
           <div className="flex flex-col gap-4">
             <div>
@@ -97,7 +70,7 @@ export default function EditPlaylistModal({ playlist, onClose }) {
                 placeholder="Name your playlist..."
               />
             </div>
-            
+
             <div>
               <label className="block text-xs font-medium text-gray-400 mb-1.5 uppercase tracking-wider">Cover Image URL (Optional)</label>
               <input
@@ -134,37 +107,35 @@ export default function EditPlaylistModal({ playlist, onClose }) {
             </div>
 
             {/* Scrollable Song List */}
-            <div 
+            <div
               ref={listWrapperRef}
               className="flex-1 overflow-y-auto bg-black/10 rounded-xl border border-white/5 p-1.5 custom-scrollbar"
             >
               <div ref={listContentRef} className="flex flex-col gap-1.5">
                 {filteredSongs.map(song => {
-                const isSelected = selectedSongIds.includes(song.id);
-                return (
-                  <div 
-                    key={song.id}
-                    onClick={() => toggleSong(song.id)}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${
-                      isSelected ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded-[4px] border flex items-center justify-center transition-colors flex-shrink-0 ${
-                      isSelected ? 'bg-white border-white text-black' : 'border-white/20'
-                    }`}>
-                      {isSelected && <Check size={10} strokeWidth={3} />}
+                  const isSelected = selectedSongIds.includes(song.id);
+                  return (
+                    <div
+                      key={song.id}
+                      onClick={() => toggleSong(song.id)}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all ${isSelected ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
+                        }`}
+                    >
+                      <div className={`w-4 h-4 rounded-[4px] border flex items-center justify-center transition-colors flex-shrink-0 ${isSelected ? 'bg-white border-white text-black' : 'border-white/20'
+                        }`}>
+                        {isSelected && <Check size={10} strokeWidth={3} />}
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className={`text-sm truncate font-medium ${isSelected ? 'text-white' : 'text-gray-300'}`}>
+                          {song.title}
+                        </span>
+                        <span className="text-[10px] text-gray-500 truncate">
+                          {song.artist}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex flex-col min-w-0">
-                      <span className={`text-sm truncate font-medium ${isSelected ? 'text-white' : 'text-gray-300'}`}>
-                        {song.title}
-                      </span>
-                      <span className="text-[10px] text-gray-500 truncate">
-                        {song.artist}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
                 {filteredSongs.length === 0 && (
                   <div className="text-center py-8 text-xs text-gray-500">
                     No songs found.

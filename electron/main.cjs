@@ -488,6 +488,14 @@ ipcMain.handle('yt-get-artist-albums', async (event, artistId) => {
   return await downloader.getArtistAlbums(artistId);
 });
 
+ipcMain.handle('yt-get-artist-songs', async (event, artistId) => {
+  return await downloader.getArtistSongs(artistId);
+});
+
+ipcMain.handle('yt-get-lyrics', async (event, title, artist) => {
+  return await downloader.getLyrics(title, artist);
+});
+
 ipcMain.handle('yt-get-album', async (event, browseId) => {
   return await downloader.getAlbum(browseId);
 });

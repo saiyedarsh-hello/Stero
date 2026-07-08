@@ -3,11 +3,11 @@ import { TableVirtuoso } from 'react-virtuoso';
 import HoldToDeleteButton from './HoldToDeleteButton';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
-import { 
-  Play, 
+import {
+  Play,
   Pause,
-  Heart, 
-  MoreVertical, 
+  Heart,
+  MoreVertical,
   Music,
   Clock,
   ChevronUp,
@@ -118,7 +118,7 @@ export default function SongList() {
   const [sortAsc, setSortAsc] = useState(true);
   const [isEditingHero, setIsEditingHero] = useState(false);
   const [scrollParent, setScrollParent] = useState(null);
-  
+
   const dropdownRef = useRef(null);
   const isPlaylistMode = activeView === 'album-detail' || activeView === 'playlist-detail';
 
@@ -176,7 +176,7 @@ export default function SongList() {
   const customAlbum = activeView === 'album-detail' && selectedAlbumId
     ? customAlbums.find(a => a.id === selectedAlbumId)
     : null;
-    
+
   if (activeView === 'songs' && appSettings?.dashboard_cover_path) {
     viewArtwork = getArtworkUrl(appSettings.dashboard_cover_path);
   } else if (customAlbum && customAlbum.cover_path) {
@@ -225,8 +225,8 @@ export default function SongList() {
         if (!artistName) return false;
         const name = artistName.toLowerCase();
         const unoriginalKeywords = [
-          'tribute', 'cover', 'covers', 'karaoke', 'instrumental', 'piano', 'lullaby', 
-          'kids', 'tunes', 'orchestra', 'singalong', 'hits band', 'tribute band', 
+          'tribute', 'cover', 'covers', 'karaoke', 'instrumental', 'piano', 'lullaby',
+          'kids', 'tunes', 'orchestra', 'singalong', 'hits band', 'tribute band',
           'originally performed', 'in the style of', 'tribute project', 'fanmade', 'fan-made'
         ];
         return !unoriginalKeywords.some(kw => name.includes(kw));
@@ -264,7 +264,7 @@ export default function SongList() {
       const normAlbum = normalizeHindiPhonetics(album);
 
       const normQueryTerms = queryTerms.map(t => normalizeHindiPhonetics(t));
-      const matchingTerms = normQueryTerms.filter(term => 
+      const matchingTerms = normQueryTerms.filter(term =>
         normArtist.includes(term) || normTitle.includes(term) || normAlbum.includes(term)
       );
 
@@ -278,7 +278,7 @@ export default function SongList() {
 
       let score = 0;
       if (matches) {
-        
+
         // Exact artist match bonus
         if (queryTerms.every(term => normArtist.includes(normalizeHindiPhonetics(term)))) {
           score += 200;
@@ -307,9 +307,9 @@ export default function SongList() {
 
       return { song, score, matches };
     })
-    .filter(item => item.matches)
-    .sort((a, b) => b.score - a.score)
-    .map(item => item.song);
+      .filter(item => item.matches)
+      .sort((a, b) => b.score - a.score)
+      .map(item => item.song);
   }, [rawSongsList, deferredSearchQuery]);
 
   const handleSort = (field) => {
@@ -346,9 +346,9 @@ export default function SongList() {
         const sameArtist = songs.filter(s => s.id !== song.id && s.artist === song.artist);
         const sameAlbum = songs.filter(s => s.id !== song.id && s.album === song.album && s.artist !== song.artist);
         const others = songs.filter(s => s.id !== song.id && s.artist !== song.artist && s.album !== song.album);
-        
+
         const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
-        
+
         const recommendedQueue = [
           song,
           ...shuffle(sameArtist),
@@ -402,11 +402,11 @@ export default function SongList() {
   return (
     <div className={`flex flex-row gap-6 lg:gap-8 select-none animate-fade-in relative ${sortedSongs.length === 0 ? 'items-stretch' : 'items-start'}`}>
       {/* Merged Header Info Panel */}
-      <div 
-        className="relative w-[35%] max-w-[320px] min-w-[220px] sticky top-0 overflow-hidden rounded-3xl backdrop-blur-2xl border border-white/10 shadow-2xl p-5 lg:p-6 flex flex-col items-start gap-5 lg:gap-6 group transition-all duration-500 z-20"
+      <div
+        className="relative w-[35%] max-w-[320px] min-w-[220px] sticky top-0 overflow-hidden rounded-3xl bg-[#131219]/85 border border-white/10 shadow-2xl p-5 lg:p-6 flex flex-col items-start gap-5 lg:gap-6 group transition-all duration-500 z-20"
         style={heroBgStyle}
       >
-        
+
         {/* Glow ambient background elements for 'songs' view */}
         {activeView === 'songs' && (
           <>
@@ -415,9 +415,9 @@ export default function SongList() {
           </>
         )}
 
-        <div 
+        <div
           onClick={handlePlayList}
-          className="relative z-10 w-full aspect-square rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 shadow-2xl flex items-center justify-center overflow-hidden flex-shrink-0 group/art cursor-pointer"
+          className="relative z-10 w-full aspect-square rounded-2xl bg-[#131219]/60 border border-white/10 shadow-2xl flex items-center justify-center overflow-hidden flex-shrink-0 group/art cursor-pointer"
         >
           {viewArtwork ? (
             <img src={viewArtwork} alt={viewTitle} className="w-full h-full object-cover transition-transform duration-500 group-hover/art:scale-105" />
@@ -438,9 +438,8 @@ export default function SongList() {
             </div>
           )}
           {rawSongsList.length > 0 && (
-            <div className={`absolute inset-0 bg-black/45 backdrop-blur-[2px] flex items-center justify-center transition-all duration-300 ${
-              isCurrentViewPlaying ? 'opacity-100' : 'opacity-0 group-hover/art:opacity-100'
-            }`}>
+            <div className={`absolute inset-0 bg-black/70 flex items-center justify-center transition-all duration-300 ${isCurrentViewPlaying ? 'opacity-100' : 'opacity-0 group-hover/art:opacity-100'
+              }`}>
               <div className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center shadow-2xl transition-all duration-300 transform hover:scale-105 active:scale-95">
                 {isCurrentViewPlaying ? (
                   <Pause size={20} fill="currentColor" className="text-[#141416]" />
@@ -451,11 +450,11 @@ export default function SongList() {
             </div>
           )}
         </div>
-        
+
         <div className="relative z-10 flex flex-col justify-end text-left w-full mb-1 flex-1">
           <span className="text-[10px] uppercase font-medium tracking-widest text-white/60">{viewSubtitle}</span>
           <h2 className="text-2xl lg:text-3xl font-display font-bold text-white tracking-tight mt-1 mb-2 leading-tight line-clamp-2 break-words">{viewTitle}</h2>
-          
+
           <div className="flex flex-col gap-4 mt-4 w-full">
             <span className="text-sm text-gray-400 font-medium">{playlistStatsStr}</span>
             <div className="flex flex-wrap justify-start gap-2 w-full">
@@ -510,22 +509,22 @@ export default function SongList() {
       </div>
 
       {/* Track List Table */}
-      <div className="w-full flex-1 rounded-2xl border border-white/10 bg-white/2 backdrop-blur-md overflow-hidden min-w-[300px]">
+      <div className="w-full flex-1 rounded-2xl border border-white/10 bg-[#131219]/65 overflow-hidden min-w-[300px]">
         {sortedSongs.length === 0 ? (
           <div className="w-full py-28 lg:py-36 flex flex-col items-center justify-center px-8 relative overflow-hidden group">
-            
+
             <Search size={42} className="text-white/20 mb-6" />
-            
+
             <h3 className="relative z-10 text-2xl lg:text-3xl font-display font-bold text-white mb-4 text-center tracking-tight">
-              {searchQuery 
-                ? 'No tracks found' 
-                : activeView === 'favorites' 
+              {searchQuery
+                ? 'No tracks found'
+                : activeView === 'favorites'
                   ? 'No favorites yet'
                   : activeView === 'album-detail' || activeView === 'playlist-detail'
                     ? 'Let\'s build your playlist'
                     : 'Your library is empty'}
             </h3>
-            
+
             <p className="relative z-10 text-sm lg:text-base text-gray-400 font-medium max-w-[400px] text-center leading-relaxed">
               {searchQuery
                 ? `We couldn't find anything matching "${searchQuery}". Try a different search term.`
@@ -542,30 +541,30 @@ export default function SongList() {
               customScrollParent={scrollParent}
               data={sortedSongs}
               components={{
-                Table: ({ style, ...props }) => <table {...props} style={{...style, width: '100%', borderCollapse: 'separate', borderSpacing: 0}} className="text-left text-sm text-gray-300" />,
+                Table: ({ style, ...props }) => <table {...props} style={{ ...style, width: '100%', borderCollapse: 'separate', borderSpacing: 0 }} className="text-left text-sm text-gray-300" />,
                 TableRow: ({ item, ...props }) => {
                   const isActive = activeTrack && item && (
-                    (item.id && activeTrack.id === item.id) || 
+                    (item.id && activeTrack.id === item.id) ||
                     (item.videoId && (activeTrack.videoId === item.videoId || activeTrack.id === item.videoId))
                   );
                   return (
-                    <tr {...props} 
+                    <tr {...props}
                       onMouseEnter={() => {
                         if (item && (item.isStream || (item.filepath && item.filepath.startsWith('yt-stream://')))) {
                           preloadTrack(item);
                         }
                       }}
-                      className={`group transition-all duration-300 ${isActive ? 'text-white relative z-10' : 'hover:bg-white/5 text-gray-300'}`} 
-                      style={{ 
-                        borderRadius: '12px', 
+                      className={`group transition-all duration-300 ${isActive ? 'text-white relative z-10' : 'hover:bg-white/5 text-gray-300'}`}
+                      style={{
+                        borderRadius: '12px',
                         overflow: 'hidden',
-                        backgroundColor: isActive 
-                          ? (dominantColor ? `hsla(${dominantColor.h}, ${dominantColor.s}%, ${dominantColor.l}%, 0.15)` : 'rgba(255, 255, 255, 0.1)') 
+                        backgroundColor: isActive
+                          ? (dominantColor ? `hsla(${dominantColor.h}, ${dominantColor.s}%, ${dominantColor.l}%, 0.15)` : 'rgba(255, 255, 255, 0.1)')
                           : undefined,
-                        boxShadow: isActive 
-                          ? (dominantColor ? `inset 3px 0 0 hsla(${dominantColor.h}, ${dominantColor.s}%, ${dominantColor.l}%, 1)` : 'inset 3px 0 0 #fff') 
+                        boxShadow: isActive
+                          ? (dominantColor ? `inset 3px 0 0 hsla(${dominantColor.h}, ${dominantColor.s}%, ${dominantColor.l}%, 1)` : 'inset 3px 0 0 #fff')
                           : undefined
-                      }} 
+                      }}
                     />
                   );
                 },
@@ -574,7 +573,7 @@ export default function SongList() {
                 Footer: () => <div className="h-28 w-full" />
               }}
               fixedHeaderContent={() => (
-                <tr className="border-b border-white/5 text-[10px] uppercase font-medium tracking-widest text-gray-500 bg-[#1c1a26]/90 backdrop-blur-md">
+                <tr className="border-b border-white/5 text-[10px] uppercase font-medium tracking-widest text-gray-500 bg-[#1c1a26]">
                   <th className="py-3.5 px-4 w-12 text-center"></th>
                   <th className="py-3.5 px-4 cursor-pointer hover:text-white" onClick={() => handleSort('title')}>
                     Title {renderSortIndicator('title')}
@@ -599,12 +598,12 @@ export default function SongList() {
               )}
               itemContent={(index, song) => {
                 const isCurrent = activeTrack && (
-                  activeTrack.id === song.id || 
+                  activeTrack.id === song.id ||
                   (activeTrack.videoId && song.filepath === `yt-stream://${activeTrack.videoId}`) ||
                   (song.filepath && song.filepath.startsWith('yt-stream://') && activeTrack.filepath === song.filepath)
                 );
                 const isCurrentPlaying = isCurrent && isPlaying;
-                
+
                 return (
                   <>
                     {/* Index or visualizer waves */}
@@ -631,7 +630,7 @@ export default function SongList() {
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-md bg-white/5 border border-white/5 flex items-center justify-center overflow-hidden flex-shrink-0">
                           {(song.has_artwork || !!(song.artwork_path || song.coverUrl || song.thumbnail)) && (song.artwork_path || song.coverUrl || song.thumbnail) ? (
-                            <RetryImage 
+                            <RetryImage
                               src={getArtworkUrl(getThumbnailUrl(song.artwork_path || song.coverUrl || song.thumbnail))}
                               alt={song.title}
                               className="w-full h-full"
@@ -654,7 +653,7 @@ export default function SongList() {
 
                     {/* Playlist */}
                     <td className={`py-3 px-4 text-xs font-normal truncate max-w-[100px] md:max-w-[150px] border-b border-white/0 cursor-pointer hidden lg:table-cell ${isCurrent ? 'text-white' : 'text-gray-300'}`} onClick={() => handleRowClick(song)}>
-                      <span 
+                      <span
                         onClick={(e) => {
                           e.stopPropagation();
                           setActiveView('album-detail', { albumName: song.album });
@@ -670,71 +669,70 @@ export default function SongList() {
                       {song.play_count > 0 ? song.play_count : '-'}
                     </td>
 
-                  {/* Duration */}
-                  {!isPlaylistMode && (
-                    <td className={`py-3 px-4 font-display text-xs text-center font-medium border-b border-white/0 cursor-pointer hidden sm:table-cell ${isCurrent ? 'text-white' : 'text-gray-400'}`} onClick={() => handleRowClick(song)}>
-                      {formatDuration(song.duration)}
-                    </td>
-                  )}
+                    {/* Duration */}
+                    {!isPlaylistMode && (
+                      <td className={`py-3 px-4 font-display text-xs text-center font-medium border-b border-white/0 cursor-pointer hidden sm:table-cell ${isCurrent ? 'text-white' : 'text-gray-400'}`} onClick={() => handleRowClick(song)}>
+                        {formatDuration(song.duration)}
+                      </td>
+                    )}
 
-                  {/* Favorite & Context action dropdown */}
-                  <td className={`py-3 px-4 text-right border-b border-white/0 rounded-r-xl ${isCurrent ? 'text-white' : ''}`} onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-end gap-3">
-                      {!isPlaylistMode && (
-                        <button 
-                          onClick={() => toggleFavorite(song.id || song.videoId, undefined, song)}
-                          className={`hover:scale-105 active:scale-95 transition-all ${
-                            song.favorite ? (isCurrent ? 'text-white' : '') : (isCurrent ? 'text-white/60 hover:text-white' : 'text-gray-500 hover:text-white')
-                          }`}
-                          style={song.favorite && !isCurrent ? { color: dominantColor ? `hsl(${dominantColor.h}, ${dominantColor.s}%, ${Math.max(40, dominantColor.l - 5)}%)` : '#FF4F6E' } : {}}
-                        >
-                          <Heart size={14} fill={song.favorite ? 'currentColor' : 'none'} />
-                        </button>
-                      )}
-                      
-                      <HoldToDeleteButton onComplete={() => deleteSong(song.id)} />
-                      
-                      <div className="relative">
-                        <button 
-                          onClick={() => setActiveMenuSongId(activeMenuSongId === song.id ? null : song.id)}
-                          className="text-gray-500 hover:text-white p-0.5 rounded-md hover:bg-white/5 transition-all"
-                        >
-                          <MoreVertical size={14} />
-                        </button>
-                        
-                        {activeMenuSongId === song.id && (
-                          <div 
-                            ref={dropdownRef}
-                            className={`absolute right-0 ${index < 3 && sortedSongs.length > 5 ? 'top-full mt-1' : 'bottom-full mb-1'} bg-[#1a1a1f]/95 backdrop-blur-xl border border-white/15 rounded-2xl w-44 py-2 z-[300] shadow-2xl flex flex-col items-stretch text-left animate-fade-in`}
+                    {/* Favorite & Context action dropdown */}
+                    <td className={`py-3 px-4 text-right border-b border-white/0 rounded-r-xl ${isCurrent ? 'text-white' : ''}`} onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-3">
+                        {!isPlaylistMode && (
+                          <button
+                            onClick={() => toggleFavorite(song.id || song.videoId, undefined, song)}
+                            className={`hover:scale-105 active:scale-95 transition-all ${song.favorite ? (isCurrent ? 'text-white' : '') : (isCurrent ? 'text-white/60 hover:text-white' : 'text-gray-500 hover:text-white')
+                              }`}
+                            style={song.favorite && !isCurrent ? { color: dominantColor ? `hsl(${dominantColor.h}, ${dominantColor.s}%, ${Math.max(40, dominantColor.l - 5)}%)` : '#FF4F6E' } : {}}
                           >
-                            <button
-                              onClick={() => {
-                                setEditingSong(song);
-                                setActiveMenuSongId(null);
-                              }}
-                              className="px-3.5 py-1.5 text-xs text-gray-300 hover:bg-white/5 hover:text-white transition-all text-left flex items-center gap-2"
+                            <Heart size={14} fill={song.favorite ? 'currentColor' : 'none'} />
+                          </button>
+                        )}
+
+                        <HoldToDeleteButton onComplete={() => deleteSong(song.id)} />
+
+                        <div className="relative">
+                          <button
+                            onClick={() => setActiveMenuSongId(activeMenuSongId === song.id ? null : song.id)}
+                            className="text-gray-500 hover:text-white p-0.5 rounded-md hover:bg-white/5 transition-all"
+                          >
+                            <MoreVertical size={14} />
+                          </button>
+
+                          {activeMenuSongId === song.id && (
+                            <div
+                              ref={dropdownRef}
+                              className={`absolute right-0 ${index < 3 && sortedSongs.length > 5 ? 'top-full mt-1' : 'bottom-full mb-1'} bg-[#1a1a1f] border border-white/15 rounded-2xl w-44 py-2 z-[300] shadow-2xl flex flex-col items-stretch text-left animate-fade-in`}
                             >
-                              <Pencil size={11} />
-                              <span>Edit track info</span>
-                            </button>
-                            {song.filepath && song.filepath.startsWith('yt-stream://') && (
                               <button
                                 onClick={() => {
-                                  const videoId = song.filepath.replace('yt-stream://', '');
-                                  usePlayerStore.getState().startDownload({ ...song, videoId });
+                                  setEditingSong(song);
                                   setActiveMenuSongId(null);
                                 }}
                                 className="px-3.5 py-1.5 text-xs text-gray-300 hover:bg-white/5 hover:text-white transition-all text-left flex items-center gap-2"
                               >
-                                <CloudDownload size={11} />
-                                <span>Download to library</span>
+                                <Pencil size={11} />
+                                <span>Edit track info</span>
                               </button>
-                            )}
-                          </div>
-                        )}
+                              {song.filepath && song.filepath.startsWith('yt-stream://') && (
+                                <button
+                                  onClick={() => {
+                                    const videoId = song.filepath.replace('yt-stream://', '');
+                                    usePlayerStore.getState().startDownload({ ...song, videoId });
+                                    setActiveMenuSongId(null);
+                                  }}
+                                  className="px-3.5 py-1.5 text-xs text-gray-300 hover:bg-white/5 hover:text-white transition-all text-left flex items-center gap-2"
+                                >
+                                  <CloudDownload size={11} />
+                                  <span>Download to library</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </td>
+                    </td>
                   </>
                 );
               }}

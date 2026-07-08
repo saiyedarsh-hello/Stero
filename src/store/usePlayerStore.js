@@ -91,6 +91,28 @@ const isSameTrack = (t1, t2) => {
   return v1 && v2 && v1 === v2;
 };
 
+const cleanArtistName = (name) => {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const isArtistMatch = (albumArtist, targetArtist) => {
+  const target = cleanArtistName(targetArtist);
+  if (!target) return false;
+  
+  const primaryArtists = albumArtist
+    .split(/[,&]|\band\b/i)
+    .map(x => cleanArtistName(x))
+    .filter(Boolean);
+    
+  return primaryArtists.some(p => p === target);
+};
+
 export const usePlayerStore = create((set, get) => ({
   // Library Data
   songs: [],
@@ -132,10 +154,11 @@ export const usePlayerStore = create((set, get) => ({
   blacklistedSongs: JSON.parse(localStorage.getItem('stero-blacklisted-songs') || '[]'),
   
   // Navigation & View
-  activeView: 'music', // 'songs', 'favorites', 'playlist-detail', 'album-detail', 'downloads'
+  activeView: 'music', // 'songs', 'favorites', 'playlist-detail', 'album-detail', 'artist-detail'
   selectedPlaylistId: null,
   selectedAlbumName: null,
   selectedAlbumId: null,
+  selectedArtist: null,
   searchQuery: '',
 
   viewHistory: [{
@@ -182,6 +205,100 @@ export const usePlayerStore = create((set, get) => ({
   // Playlist being edited (global modal trigger)
   editingPlaylist: null,
   setEditingPlaylist: (playlist) => set({ editingPlaylist: playlist }),
+
+  // Queue Sidebar State
+  isQueueSidebarOpen: false,
+  toggleQueueSidebar: () => set(state => ({ isQueueSidebarOpen: !state.isQueueSidebarOpen, isLyricsSidebarOpen: !state.isQueueSidebarOpen ? false : state.isLyricsSidebarOpen })),
+
+  // Lyrics Sidebar State
+  isLyricsSidebarOpen: false,
+  toggleLyricsSidebar: () => {
+    const { isLyricsSidebarOpen } = get();
+    const nextOpen = !isLyricsSidebarOpen;
+    set({ 
+      isLyricsSidebarOpen: nextOpen,
+      isQueueSidebarOpen: nextOpen ? false : get().isQueueSidebarOpen
+    });
+    // Do NOT re-fetch here — the sidebar itself handles fetching
+  },
+
+  // Lyrics cache — persists across sidebar open/close, cleared only on track change
+  activeTrackLyrics: { loading: false, data: null, error: null },
+  lyricsCache: {},
+
+  fetchActiveTrackLyrics: async () => {
+    const { activeTrack, lyricsCache } = get();
+    if (!activeTrack) {
+      set({ activeTrackLyrics: { loading: false, data: null, error: null } });
+      return;
+    }
+
+    // Cache key — unique per track
+    const cacheKey = activeTrack.id
+      ? String(activeTrack.id)
+      : `${activeTrack.title}|${activeTrack.artist}`;
+
+    // ── Cache hit: serve instantly, no loading state ──
+    if (lyricsCache[cacheKey]) {
+      const cached = lyricsCache[cacheKey];
+      // If we already have the correct data in activeTrackLyrics, skip the set()
+      const current = get().activeTrackLyrics;
+      if (!current.loading && current.data === cached.data) return;
+      set({ activeTrackLyrics: { loading: false, data: cached.data, error: null } });
+      return;
+    }
+
+    // ── Already fetching for this track — don't spawn a duplicate request ──
+    const current = get().activeTrackLyrics;
+    if (current.loading && current._fetchKey === cacheKey) return;
+
+    set({ activeTrackLyrics: { loading: true, data: null, error: null, _fetchKey: cacheKey } });
+
+    try {
+      const title = activeTrack.title || '';
+      const artist = activeTrack.artist || '';
+
+      if (!window.electron) {
+        setTimeout(() => {
+          const data = {
+            lyrics: `[00:02.00] This is a mock lyric line 1\n[00:06.00] This is a mock lyric line 2\n[00:10.00] This is a mock lyric line 3\n[00:14.00] Enjoy the music!`,
+            isSynced: true
+          };
+          // Only apply if we're still on the same track
+          if (get().activeTrack?.title === title) {
+            set(state => ({
+              activeTrackLyrics: { loading: false, data, error: null },
+              lyricsCache: { ...state.lyricsCache, [cacheKey]: { data } }
+            }));
+          }
+        }, 1000);
+        return;
+      }
+
+      const res = await window.electron.ytGetLyrics(title, artist);
+
+      // Guard: make sure we're still on the same track when the response arrives
+      const stillSameTrack = (() => {
+        const t = get().activeTrack;
+        const key = t?.id ? String(t.id) : `${t?.title}|${t?.artist}`;
+        return key === cacheKey;
+      })();
+      if (!stillSameTrack) return;
+
+      if (res && res.lyrics) {
+        const data = res;
+        set(state => ({
+          activeTrackLyrics: { loading: false, data, error: null },
+          lyricsCache: { ...state.lyricsCache, [cacheKey]: { data } }
+        }));
+      } else {
+        set({ activeTrackLyrics: { loading: false, data: null, error: 'Lyrics not found' } });
+      }
+    } catch (err) {
+      console.error('Failed to fetch lyrics:', err);
+      set({ activeTrackLyrics: { loading: false, data: null, error: 'Failed to load lyrics' } });
+    }
+  },
 
   // Downloads State
   downloadState: {
@@ -707,9 +824,8 @@ export const usePlayerStore = create((set, get) => ({
 
   fetchTrendingArtists: async (language) => {
     if (!window.electron) return [];
-    const results = await window.electron.ytSearchTrending(`top 10 monthly ${language} artist`, 'artist');
-    // Ensure we only return top 10
-    return results.slice(0, 10);
+    const results = await window.electron.ytSearchTrending(`top monthly ${language} artist`, 'artist');
+    return results || [];
   },
 
   fetchFollowedArtistsSongs: async (artists) => {
@@ -717,15 +833,24 @@ export const usePlayerStore = create((set, get) => ({
       set({ followedArtistSongs: [] });
       return;
     }
-    
     try {
-      const promises = artists.map(artist => window.electron.ytSearch(`${artist.name} songs`));
+      const promises = artists.map(async (artist) => {
+        const id = artist.id || artist.browseId;
+        let songs = [];
+        if (id && typeof window.electron.ytGetArtistSongs === 'function') {
+          songs = await window.electron.ytGetArtistSongs(id) || [];
+        } else {
+          songs = await window.electron.ytSearch(`${artist.name} songs`) || [];
+        }
+        
+        return songs.filter(s => isArtistMatch(s.artist || '', artist.name));
+      });
       const results = await Promise.all(promises);
       
       let combined = [];
       results.forEach(res => {
          if (res && res.length > 0) {
-            combined = combined.concat(res.slice(0, 10));
+            combined = combined.concat(res);
          }
       });
       
@@ -743,7 +868,17 @@ export const usePlayerStore = create((set, get) => ({
     }
     
     try {
-      const promises = artists.map(artist => window.electron.ytGetArtistAlbums(artist.id || artist.browseId));
+      const promises = artists.map(async (artist) => {
+        const id = artist.id || artist.browseId;
+        let albums = [];
+        if (id && typeof window.electron.ytGetArtistAlbums === 'function') {
+          albums = await window.electron.ytGetArtistAlbums(id) || [];
+        } else {
+          albums = await window.electron.ytSearchAlbums(artist.name) || [];
+        }
+        
+        return albums.filter(a => isArtistMatch(a.artist || '', artist.name)).slice(0, 10);
+      });
       const results = await Promise.all(promises);
       
       let combined = [];
@@ -763,11 +898,17 @@ export const usePlayerStore = create((set, get) => ({
 
   toggleFollowArtist: (artist) => {
     const { followedArtists } = get();
-    const isFollowed = followedArtists.some(a => (a.id || a.browseId) === (artist.id || artist.browseId));
+    const isFollowed = followedArtists.some(a => 
+      ((a.id || a.browseId) && (a.id || a.browseId) === (artist.id || artist.browseId)) ||
+      (a.name && a.name.toLowerCase() === artist.name.toLowerCase())
+    );
     let newFollowed;
     
     if (isFollowed) {
-      newFollowed = followedArtists.filter(a => (a.id || a.browseId) !== (artist.id || artist.browseId));
+      newFollowed = followedArtists.filter(a => 
+        !(((a.id || a.browseId) && (a.id || a.browseId) === (artist.id || artist.browseId)) ||
+        (a.name && a.name.toLowerCase() === artist.name.toLowerCase()))
+      );
     } else {
       newFollowed = [...followedArtists, artist];
     }
@@ -952,6 +1093,7 @@ export const usePlayerStore = create((set, get) => ({
       selectedPlaylistId: extra.playlistId || null,
       selectedAlbumName: extra.albumName || null,
       selectedAlbumId: extra.albumId || null,
+      selectedArtist: extra.artist || null,
     };
 
     set(state => {
@@ -1417,7 +1559,9 @@ export const usePlayerStore = create((set, get) => ({
       isPlaying: true,
       activePlaylistId: resolvedPlaylistId,
       currentRepeatCount: 0,
-      savedPosition: 0
+      savedPosition: 0,
+      // Clear stale lyrics immediately so sidebar shows loading state for new track
+      activeTrackLyrics: { loading: false, data: null, error: null }
     });
 
     // Increment play count in DB and update state
@@ -1436,6 +1580,11 @@ export const usePlayerStore = create((set, get) => ({
     setTimeout(() => {
       get().preloadNextTrack();
     }, 1000);
+
+    // Pre-fetch lyrics in background so they're ready when lyrics sidebar is opened
+    setTimeout(() => {
+      get().fetchActiveTrackLyrics();
+    }, 300);
   },
 
   preloadNextTrack: async () => {
@@ -1453,7 +1602,7 @@ export const usePlayerStore = create((set, get) => ({
       const nextTrack = queue[nextIndex];
       if (nextTrack && nextTrack.isStream && !nextTrack.filepath && window.electron) {
         console.log(`[Preload] Resolving stream URL in background for next track: ${nextTrack.title}`);
-        window.electron.ytGetStreamUrl(nextTrack.id).then(result => {
+        window.electron.ytGetStreamUrl(nextTrack.videoId || nextTrack.id).then(result => {
           if (result && result.success && result.url) {
             set(state => {
               const updatedQueue = state.queue.map((t, idx) => 
@@ -1528,7 +1677,7 @@ export const usePlayerStore = create((set, get) => ({
       }));
 
       if (nextTrack.isStream && !nextTrack.filepath && window.electron) {
-        window.electron.ytGetStreamUrl(nextTrack.id).then(result => {
+        window.electron.ytGetStreamUrl(nextTrack.videoId || nextTrack.id).then(result => {
            if (result && result.success && result.url) {
              set(state => ({
                activeTrack: state.activeTrack?.id === nextTrack.id 
@@ -1560,7 +1709,7 @@ export const usePlayerStore = create((set, get) => ({
       set({ activeTrack: prevTrack, queueIndex: prevIndex, isPlaying: true, currentRepeatCount: 0 });
 
       if (prevTrack.isStream && !prevTrack.filepath && window.electron) {
-        window.electron.ytGetStreamUrl(prevTrack.id).then(result => {
+        window.electron.ytGetStreamUrl(prevTrack.videoId || prevTrack.id).then(result => {
            if (result && result.success && result.url) {
              set(state => ({
                activeTrack: state.activeTrack?.id === prevTrack.id 

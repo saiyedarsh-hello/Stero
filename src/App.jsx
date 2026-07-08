@@ -1,11 +1,14 @@
 import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { usePlayerStore } from './store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
-import Lenis from 'lenis';
 import Sidebar from './components/Sidebar';
+import QueueSidebar from './components/QueueSidebar';
+import LyricsSidebar from './components/LyricsSidebar';
+import ArtistPage from './components/ArtistPage';
 import PlayerBar from './components/PlayerBar';
 import WindowControls from './components/WindowControls';
 import MusicSection from './components/MusicSection';
+import ForYouSection from './components/ForYouSection';
 import { Search, ChevronLeft, ChevronRight, RefreshCw, Menu, FolderSearch, X, Clock, Home } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -235,32 +238,7 @@ export default function App() {
     }
   }, [activeTrack, setDominantColor]);
 
-  // Initialize Lenis for premium smooth momentum scrolling
-  useEffect(() => {
-    if (!scrollWrapperRef.current || !scrollContentRef.current) return;
-
-    const lenis = new Lenis({
-      wrapper: scrollWrapperRef.current,
-      content: scrollContentRef.current,
-      lerp: 0.08,
-      duration: 1.2,
-      smoothWheel: true,
-      wheelMultiplier: 1.2,
-    });
-
-    let rafId;
-    function raf(time) {
-      lenis.raf(time);
-      rafId = requestAnimationFrame(raf);
-    }
-
-    rafId = requestAnimationFrame(raf);
-
-    return () => {
-      lenis.destroy();
-      cancelAnimationFrame(rafId);
-    };
-  }, []);
+  // Lenis smooth scroll removed for performance optimization
 
   // Global keyboard shortcuts for playback and volume controls
   useEffect(() => {
@@ -343,6 +321,8 @@ export default function App() {
     switch (activeView) {
       case 'music':
         return <MusicSection />;
+      case 'for-you':
+        return <ForYouSection />;
       case 'songs':
       case 'favorites':
       case 'playlist-detail':
@@ -350,6 +330,8 @@ export default function App() {
         return <SongList />;
       case 'albums':
         return <AlbumGrid />;
+      case 'artist-detail':
+        return <ArtistPage />;
       case 'visualizer':
         return <SongList />;
       default:
@@ -456,14 +438,13 @@ export default function App() {
         </>
       )}
 
-      {/* Blurred Album Art Background */}
+      {/* Dynamic Smooth Color Gradient Background */}
       <div
-        className="absolute inset-0 bg-cover bg-center transition-all duration-1000 ease-in-out pointer-events-none opacity-40"
+        className="absolute inset-0 transition-colors duration-1000 ease-in-out pointer-events-none opacity-45"
         style={{
-          backgroundImage: (activeTrack?.artwork_path || activeTrack?.coverUrl || activeTrack?.thumbnail) ? `url("${getMediaUrl(activeTrack.artwork_path || activeTrack.coverUrl || activeTrack.thumbnail)}")` : 'none',
-          filter: 'blur(65px) saturate(150%)',
-          transform: 'scale(1.2) translate3d(0, 0, 0)',
-          willChange: 'transform, opacity',
+          background: dominantColor
+            ? `radial-gradient(circle at 50% 30%, hsla(${dominantColor.h}, ${dominantColor.s}%, 25%, 0.3) 0%, rgba(5, 5, 8, 0) 70%), linear-gradient(180deg, rgba(5, 5, 8, 0.4) 0%, #050508 100%)`
+            : 'linear-gradient(180deg, rgba(22, 22, 26, 0.4) 0%, #050508 100%)',
           zIndex: 0
         }}
       />
@@ -477,7 +458,7 @@ export default function App() {
         <div className="transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]">
           <Sidebar
             isCollapsed={isSidebarCollapsed}
-            onToggleCollapse={() => setIsSidebarCollapsed(true)}
+            onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           />
         </div>
 
@@ -490,17 +471,6 @@ export default function App() {
             <div className="absolute top-0 left-0 right-0 h-6 window-drag" />
             {/* Left aligned: navigation controls */}
             <div className="flex items-center gap-6 justify-start">
-              {/* Sidebar Expand Button (visible only when collapsed) */}
-              {isSidebarCollapsed && (
-                <button
-                  onClick={() => setIsSidebarCollapsed(false)}
-                  className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/10 flex items-center justify-center transition-all active:scale-95 animate-fade-in"
-                  title="Expand Sidebar"
-                >
-                  <Menu size={20} />
-                </button>
-              )}
-
               {/* Chevrons Navigation Indicators */}
               <div className="flex gap-1.5">
                 <button
@@ -687,7 +657,8 @@ export default function App() {
           {/* Scrollable Main Content */}
           <main
             ref={scrollWrapperRef}
-            className="flex-1 overflow-y-auto px-8 py-6 pb-36 relative z-10 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            className={`flex-1 overflow-y-auto pb-36 relative z-10 transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${activeView === 'artist-detail' ? 'px-0 py-0' : 'px-8 py-6'
+              }`}
           >
             <div ref={scrollContentRef} className="w-full min-h-full relative">
               <Suspense fallback={
@@ -739,6 +710,16 @@ export default function App() {
               </Suspense>
             </div>
           </main>
+        </div>
+
+        {/* Queue Sidebar */}
+        <div className="transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]">
+          <QueueSidebar />
+        </div>
+
+        {/* Lyrics Sidebar */}
+        <div className="transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] h-full">
+          <LyricsSidebar />
         </div>
 
       </div>
