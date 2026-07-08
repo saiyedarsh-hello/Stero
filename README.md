@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎵 Stero
+#  Stero
 
 **A feature-rich, beautiful Desktop Music Player built with React, Vite, Electron, and Tailwind CSS.**
 
