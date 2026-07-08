@@ -184,7 +184,7 @@ export default function ForYouSection() {
                 </div>
               </div>
               
-              <div ref={followedScrollRef} className="flex flex-col gap-4 overflow-x-auto pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
+              <div ref={followedScrollRef} className="flex flex-col gap-4 overflow-x-auto pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar">
                 {rowSongsList.map((rowSongs, rowIndex) => (
                   <div key={rowIndex} className="flex gap-4 flex-shrink-0">
                     {rowSongs.map((song, i) => {
@@ -286,7 +286,7 @@ export default function ForYouSection() {
                   </button>
                 </div>
               </div>
-              <div ref={customAlbumsScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar snap-x snap-mandatory">
+              <div ref={customAlbumsScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar snap-x snap-mandatory">
                 {customAlbums.map((album, i) => (
                   <div
                     key={album.id + '-' + i}
@@ -334,7 +334,7 @@ export default function ForYouSection() {
                   </button>
                 </div>
               </div>
-              <div ref={followedAlbumScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar snap-x snap-mandatory">
+              <div ref={followedAlbumScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar snap-x snap-mandatory">
                 {followedArtistAlbums.map((album, i) => (
                   <div
                     key={album.id + '-' + i}
@@ -383,7 +383,7 @@ export default function ForYouSection() {
                 </div>
               </div>
               
-              <div ref={likedScrollRef} className="flex flex-col gap-4 overflow-x-auto pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
+              <div ref={likedScrollRef} className="flex flex-col gap-4 overflow-x-auto pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar">
                 {rowLikedSongsList.map((rowSongs, rowIndex) => (
                   <div key={rowIndex} className="flex gap-4 flex-shrink-0">
                     {rowSongs.map((song, i) => {

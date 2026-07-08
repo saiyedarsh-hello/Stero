@@ -262,7 +262,7 @@ export default function MusicSection() {
               </button>
             </div>
           </div>
-          <div ref={artistScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
+          <div ref={artistScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar">
             {displayArtists.length === 0 ? (
               loading ? (
                 Array.from({ length: 8 }).map((_, i) => (
@@ -352,7 +352,7 @@ export default function MusicSection() {
               </button>
             </div>
           </div>
-          <div ref={myTasteScrollRef} className="flex overflow-x-auto gap-6 pb-4 px-4 hide-scrollbar snap-x snap-mandatory">
+          <div ref={myTasteScrollRef} className="flex overflow-x-auto gap-6 pb-4 pl-4 pr-8 -mr-8 hide-scrollbar snap-x snap-mandatory">
             {Array.from({ length: Math.ceil(myTaste.slice(0, 24).length / 3) }).map((_, colIndex) => {
               const colSongs = myTaste.slice(colIndex * 3, colIndex * 3 + 3);
               return (
@@ -479,7 +479,7 @@ export default function MusicSection() {
             </div>
           </div>
         </div>
-        <div ref={songScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
+        <div ref={songScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar">
           {loading ? (
             Array.from({ length: 5 }).map((_, i) => (
               <div key={`trend-skel-${i}`} className="flex flex-col gap-3 flex-shrink-0 w-44">
@@ -587,7 +587,7 @@ export default function MusicSection() {
               </button>
             </div>
           </div>
-          <div ref={searchAlbumScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 px-4 -mt-4 hide-scrollbar">
+          <div ref={searchAlbumScrollRef} className="flex overflow-x-auto gap-6 pb-4 pt-4 pl-4 pr-8 -mr-8 -mt-4 hide-scrollbar">
             {ytAlbumSearchResults.length === 0 ? (
               loading ? (
                 Array.from({ length: 5 }).map((_, i) => (

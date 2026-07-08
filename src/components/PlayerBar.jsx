@@ -509,6 +509,7 @@ export default function PlayerBar() {
 
 
   const toggleVisualizer = () => {
+    if (!activeTrack) return;
     if (activeView === 'visualizer') {
       goBackView();
     } else {
@@ -595,8 +596,10 @@ export default function PlayerBar() {
       <div className="flex items-center gap-4 w-1/4 min-w-[220px]">
         <div
           onClick={toggleVisualizer}
-          className="w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex-shrink-0 cursor-pointer overflow-hidden relative group/art"
-          title="Toggle Canvas Visualizer"
+          className={`w-14 h-14 rounded-xl bg-white/5 border border-white/10 flex-shrink-0 overflow-hidden relative group/art ${
+            activeTrack ? 'cursor-pointer' : 'cursor-default'
+          }`}
+          title={activeTrack ? "Toggle Canvas Visualizer" : undefined}
         >
           {currentSong.artwork_path || currentSong.coverUrl || currentSong.thumbnail ? (
             <RetryImage
@@ -817,9 +820,15 @@ export default function PlayerBar() {
 
         <button
           onClick={toggleVisualizer}
-          className={`w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-105 active:scale-95 transition-all ${activeView === 'visualizer' ? 'text-white' : 'text-white/80 hover:text-white'
-            }`}
-          title="Canvas Visualizer"
+          disabled={!activeTrack}
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
+            !activeTrack 
+              ? 'opacity-30 cursor-not-allowed text-white/40' 
+              : activeView === 'visualizer'
+                ? 'text-white bg-white/20 hover:scale-105 active:scale-95'
+                : 'text-white/80 hover:text-white hover:bg-white/20 hover:scale-105 active:scale-95'
+          }`}
+          title={activeTrack ? "Canvas Visualizer" : "Play a song to view visualizer"}
         >
           <Maximize2 size={15} />
         </button>

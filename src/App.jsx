@@ -316,6 +316,13 @@ export default function App() {
     setSearchQuery('');
   }, [activeView, setSearchQuery]);
 
+  // If no song is playing (or activeTrack is null), disable visualizer mode and redirect to main view
+  useEffect(() => {
+    if (activeView === 'visualizer' && !activeTrack) {
+      setActiveView('music');
+    }
+  }, [activeView, activeTrack, setActiveView]);
+
   // Determine active component in main view panel
   const renderActiveView = () => {
     switch (activeView) {
@@ -438,13 +445,35 @@ export default function App() {
         </>
       )}
 
-      {/* Dynamic Smooth Color Gradient Background */}
+      {/* Smooth Transitioning Base Tint */}
       <div
-        className="absolute inset-0 transition-colors duration-1000 ease-in-out pointer-events-none opacity-45"
+        className="absolute inset-0 transition-colors duration-[1500ms] ease-in-out pointer-events-none"
         style={{
-          background: dominantColor
-            ? `radial-gradient(circle at 50% 30%, hsla(${dominantColor.h}, ${dominantColor.s}%, 25%, 0.3) 0%, rgba(5, 5, 8, 0) 70%), linear-gradient(180deg, rgba(5, 5, 8, 0.4) 0%, #050508 100%)`
-            : 'linear-gradient(180deg, rgba(22, 22, 26, 0.4) 0%, #050508 100%)',
+          backgroundColor: dominantColor
+            ? `hsl(${dominantColor.h}, ${Math.min(25, Math.max(10, dominantColor.s - 25))}%, 6%)`
+            : '#050508',
+          zIndex: 0
+        }}
+      />
+
+      {/* Smooth Transitioning Top-Center Ambient Glow (using mask for 0-cost blending) */}
+      <div
+        className="absolute -top-[250px] left-1/2 -translate-x-1/2 w-[800px] h-[600px] pointer-events-none transition-colors duration-[1500ms] ease-in-out opacity-35"
+        style={{
+          backgroundColor: dominantColor
+            ? `hsl(${dominantColor.h}, ${Math.min(80, Math.max(45, dominantColor.s))}%, 24%)`
+            : 'transparent',
+          WebkitMaskImage: 'radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 70%)',
+          maskImage: 'radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 70%)',
+          zIndex: 0
+        }}
+      />
+
+      {/* Static Vignette Overlay */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-50"
+        style={{
+          background: 'radial-gradient(circle at 50% 25%, rgba(255, 255, 255, 0.02) 0%, rgba(5, 5, 8, 0.95) 90%)',
           zIndex: 0
         }}
       />
@@ -733,11 +762,13 @@ export default function App() {
 
       {/* Bottom Gradient Mask to fill space behind the floating player */}
       <div
-        className="absolute bottom-0 left-0 right-0 h-40 pointer-events-none z-40 transition-colors duration-1000 ease-in-out"
+        className="absolute bottom-0 left-0 right-0 h-40 pointer-events-none z-40 transition-colors duration-[1500ms] ease-in-out"
         style={{
-          background: dominantColor
-            ? `linear-gradient(to top, hsl(${dominantColor.h}, ${dominantColor.s}%, ${Math.max(2, dominantColor.l - 8)}%) 0%, transparent 100%)`
-            : 'linear-gradient(to top, #000 0%, transparent 100%)'
+          backgroundColor: dominantColor
+            ? `hsl(${dominantColor.h}, ${dominantColor.s}%, ${Math.max(2, dominantColor.l - 8)}%)`
+            : '#000000',
+          WebkitMaskImage: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)',
+          maskImage: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 100%)'
         }}
       />
 
