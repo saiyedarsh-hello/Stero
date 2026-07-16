@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { useShallow } from 'zustand/react/shallow';
-import { X, Disc, Play, Pause, SkipBack, SkipForward, Music, Shuffle, Repeat, Volume2, VolumeX } from 'lucide-react';
+import { X, Disc, Play, Pause, SkipBack, SkipForward, Music, Shuffle, Repeat, Volume2, VolumeX, ListMusic } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const formatTime = (seconds) => {
@@ -65,7 +65,9 @@ export default function Visualizer() {
     volume,
     setVolume,
     muted,
-    setMuted
+    setMuted,
+    isQueueSidebarOpen,
+    toggleQueueSidebar
   } = usePlayerStore(useShallow(state => ({
     activeTrack: state.activeTrack,
     activeView: state.activeView,
@@ -85,7 +87,9 @@ export default function Visualizer() {
     volume: state.volume,
     setVolume: state.setVolume,
     muted: state.muted,
-    setMuted: state.setMuted
+    setMuted: state.setMuted,
+    isQueueSidebarOpen: state.isQueueSidebarOpen,
+    toggleQueueSidebar: state.toggleQueueSidebar
   })));
 
   const [isSeeking, setIsSeeking] = useState(false);
@@ -100,6 +104,13 @@ export default function Visualizer() {
   // Handle Close
   const handleClose = () => {
     goBackView();
+  };
+
+  const handleQueueClick = () => {
+    goBackView();
+    if (!isQueueSidebarOpen) {
+      toggleQueueSidebar();
+    }
   };
 
   // Keyboard escape
@@ -310,24 +321,68 @@ export default function Visualizer() {
           0%, 100% { height: 4px; }
           50% { height: 16px; }
         }
+        .volume-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 9px;
+          height: 9px;
+          border-radius: 9999px;
+          background: #ffffff;
+          cursor: pointer;
+          transition: transform 0.15s ease;
+        }
+        .volume-slider::-webkit-slider-thumb:hover {
+          transform: scale(1.3);
+        }
+        .volume-slider::-moz-range-thumb {
+          width: 9px;
+          height: 9px;
+          border-radius: 9999px;
+          background: #ffffff;
+          cursor: pointer;
+          border: none;
+          transition: transform 0.15s ease;
+        }
+        .volume-slider::-moz-range-thumb:hover {
+          transform: scale(1.3);
+        }
       `}</style>
 
       {/* Ambient background blur derived from active track artwork (softer blend & opacity for buttery smoothness) */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 select-none opacity-25 mix-blend-normal">
-        {highResImgUrl ? (
-          <img 
-            src={highResImgUrl} 
-            alt="background-artwork-mesh" 
-            className="w-full h-full object-cover scale-[1.35] blur-[120px] saturate-[180%] select-none pointer-events-none transition-all duration-[1500ms] ease-in-out animate-mesh-drift"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-[#1c1a26] to-[#0a0a0c] opacity-60" />
-        )}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 select-none">
+        <AnimatePresence initial={false}>
+          {highResImgUrl ? (
+            <motion.img 
+              key={highResImgUrl}
+              src={highResImgUrl} 
+              alt="background-artwork-blur" 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.75 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.8, ease: "easeInOut" }}
+              className="absolute inset-0 w-full h-full object-cover scale-110 saturate-[150%] select-none pointer-events-none"
+              style={{ filter: 'blur(45px)', willChange: 'opacity' }}
+            />
+          ) : (
+            <motion.div 
+              key="fallback-bg"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.6 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.8 }}
+              className="absolute inset-0 w-full h-full bg-gradient-to-br from-[#1c1a26] to-[#0a0a0c]"
+              style={{ willChange: 'opacity' }}
+            />
+          )}
+        </AnimatePresence>
       </div>
+
+      {/* Dark overlay to ensure coverflow cards and controls pop */}
+      <div className="absolute inset-0 bg-black/30 z-0 pointer-events-none" />
 
       {/* Deep smooth vignette layer to eliminate gradient banding */}
       <div 
-        className="absolute inset-0 pointer-events-none z-0 opacity-80"
+        className="absolute inset-0 pointer-events-none z-0 opacity-45"
         style={{
           background: 'radial-gradient(circle at center, transparent 35%, rgba(0, 0, 0, 0.75) 100%)'
         }}
@@ -355,7 +410,7 @@ export default function Visualizer() {
         <AnimatePresence initial={false}>
           {coverflowTracks.map((track, idx) => {
             const offset = idx - activeIndex;
-            if (Math.abs(offset) > 2) return null; // Render max 5 cards
+            if (Math.abs(offset) > 3) return null; // Render max 7 cards
 
             const isCenter = offset === 0;
             const trackArt = track.artwork_path || track.coverUrl || track.thumbnail;
@@ -363,13 +418,14 @@ export default function Visualizer() {
             return (
               <motion.div
                 key={track.id || track.videoId || idx}
-                className="absolute w-[240px] sm:w-[280px] md:w-[320px] rounded-3xl overflow-hidden shadow-[0_30px_90px_-15px_rgba(0,0,0,0.85)] border border-white/10 flex flex-col bg-[#16151a]/95 backdrop-blur-2xl cursor-pointer"
+                className="absolute w-[240px] sm:w-[280px] md:w-[320px] rounded-3xl overflow-hidden border border-white/10 flex flex-col bg-[#16151a] cursor-pointer"
                 style={{ 
                   transformStyle: 'preserve-3d',
-                  boxShadow: isCenter ? '0 35px 100px -15px rgba(0,0,0,0.9)' : '0 30px 90px -15px rgba(0,0,0,0.85)'
+                  boxShadow: '0 30px 90px -15px rgba(0,0,0,0.85)',
+                  willChange: 'transform, opacity'
                 }}
                 animate={getCardStyles(offset)}
-                transition={{ type: 'spring', stiffness: 220, damping: 26 }}
+                transition={{ type: 'spring', stiffness: 180, damping: 24 }}
                 onClick={() => {
                   if (isCenter) {
                     togglePlay();
@@ -525,6 +581,15 @@ export default function Visualizer() {
         {/* Right Section: Shuffle, Repeat, Volume Control */}
         <div className="flex items-center gap-3 flex-shrink-0">
           <button
+            onClick={handleQueueClick}
+            className={`w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 transition-all active:scale-95 ${
+              isQueueSidebarOpen ? 'text-white bg-white/10' : 'text-white/60 hover:text-white'
+            }`}
+            title="Queue"
+          >
+            <ListMusic size={14} />
+          </button>
+          <button
             onClick={() => setShuffle(!shuffle)}
             className={`w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 transition-all active:scale-95 ${
               shuffle ? 'text-white bg-white/10' : 'text-white/60 hover:text-white'
@@ -567,7 +632,7 @@ export default function Visualizer() {
                 setVolume(parseFloat(e.target.value));
                 if (muted) setMuted(false);
               }}
-              className="w-16 h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-white" 
+              className="volume-slider w-16 h-1 bg-white/20 rounded-full appearance-none cursor-pointer" 
               title="Volume"
             />
           </div>

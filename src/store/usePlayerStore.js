@@ -1600,7 +1600,7 @@ export const usePlayerStore = create((set, get) => ({
 
     if (nextIndex < queue.length) {
       const nextTrack = queue[nextIndex];
-      if (nextTrack && nextTrack.isStream && !nextTrack.filepath && window.electron) {
+      if (nextTrack && nextTrack.isStream && (!nextTrack.filepath || nextTrack.filepath.startsWith('yt-stream://')) && window.electron) {
         console.log(`[Preload] Resolving stream URL in background for next track: ${nextTrack.title}`);
         window.electron.ytGetStreamUrl(nextTrack.videoId || nextTrack.id).then(result => {
           if (result && result.success && result.url) {
@@ -1610,7 +1610,7 @@ export const usePlayerStore = create((set, get) => ({
               );
               return { 
                 queue: updatedQueue,
-                activeTrack: state.activeTrack?.id === nextTrack.id && !state.activeTrack.filepath
+                activeTrack: state.activeTrack?.id === nextTrack.id && (!state.activeTrack.filepath || state.activeTrack.filepath.startsWith('yt-stream://'))
                   ? { ...state.activeTrack, filepath: result.url }
                   : state.activeTrack
               };

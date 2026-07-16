@@ -166,6 +166,7 @@ class Downloader {
     this.completed = [];
     this.searchCache = new Map(); // key => { data, timestamp }
     this.webContents = null;
+    this.activeResolutions = new Map(); // videoId => Promise<directUrl>
 
     // Start local streaming proxy for audio chunking (yt-dlp based, unchanged)
     this.proxyPort = 8998;
@@ -241,7 +242,90 @@ class Downloader {
     req.on('close', () => proxyReq.destroy());
   }
 
-  handleStreamProxy(req, res) {
+  async resolveStreamingUrl(videoId) {
+    // 1. Check cache first
+    const cached = streamCache.get(videoId);
+    const now = Date.now();
+    if (cached && (now - cached.timestamp < CACHE_DURATION)) {
+      return cached.url;
+    }
+
+    // 2. Check if there is already an active resolution for this videoId
+    if (this.activeResolutions.has(videoId)) {
+      return this.activeResolutions.get(videoId);
+    }
+
+    // 3. Start resolution
+    const resolvePromise = (async () => {
+      // Try Innertube first
+      try {
+        console.log(`[Streaming Proxy] Resolving stream URL natively with Innertube for: ${videoId}`);
+        const yt = await getInnertube();
+        const info = await yt.getBasicInfo(videoId);
+        const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+        if (format) {
+          let directUrl = format.url;
+          if (!directUrl && format.decipher) {
+            directUrl = format.decipher(yt.session.signature_timestamp);
+          }
+          if (directUrl && directUrl.startsWith('http')) {
+            streamCache.set(videoId, { url: directUrl, timestamp: Date.now() });
+            console.log(`[Streaming Proxy] Innertube resolved stream URL successfully for: ${videoId}`);
+            return directUrl;
+          }
+        }
+      } catch (err) {
+        console.warn(`[Streaming Proxy] Innertube failed for ${videoId}, falling back to yt-dlp:`, err);
+      }
+
+      // Fallback to yt-dlp
+      return new Promise((resolve, reject) => {
+        console.log(`[Streaming Proxy] Spawning yt-dlp fallback for: ${videoId}`);
+        const ytDlpPath = path.join(process.env.YOUTUBE_DL_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+        const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        const args = [
+          targetUrl,
+          '--format', '140/m4a/bestaudio/18/best',
+          '-g',
+          '--js-runtimes', 'node',
+          '--no-warnings',
+          '--no-playlist',
+          '--no-check-formats',
+          '--no-check-certificates'
+        ];
+
+        const { execFile } = require('child_process');
+        execFile(ytDlpPath, args, (error, stdout) => {
+          if (error) {
+            console.error('[Streaming Proxy] yt-dlp fallback failed:', error);
+            return reject(error);
+          }
+
+          const directUrl = stdout.trim();
+          if (!directUrl || !directUrl.startsWith('http')) {
+            return reject(new Error('Invalid URL from yt-dlp'));
+          }
+
+          streamCache.set(videoId, { url: directUrl, timestamp: Date.now() });
+          console.log(`[Streaming Proxy] yt-dlp fallback resolved stream URL successfully for: ${videoId}`);
+          resolve(directUrl);
+        });
+      });
+    })();
+
+    // Store in activeResolutions
+    this.activeResolutions.set(videoId, resolvePromise);
+
+    try {
+      const resultUrl = await resolvePromise;
+      return resultUrl;
+    } finally {
+      // Clean up activeResolutions once finished
+      this.activeResolutions.delete(videoId);
+    }
+  }
+
+  async handleStreamProxy(req, res) {
     const urlParts = new URL(req.url, `http://${req.headers.host}`);
     if (urlParts.pathname !== '/stream') {
       res.writeHead(404);
@@ -254,52 +338,30 @@ class Downloader {
       return res.end('Missing videoId');
     }
 
-    const cached = streamCache.get(videoId);
-    const now = Date.now();
-    if (cached && (now - cached.timestamp < CACHE_DURATION)) {
-      this.pipeStream(cached.url, req, res);
-      return;
-    }
-
-    const ytDlpPath = path.join(process.env.YOUTUBE_DL_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
-    const targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const args = [
-      targetUrl,
-      '--format', '140/m4a/bestaudio/18/best',
-      '-g',
-      '--js-runtimes', 'node',
-      '--no-warnings',
-      '--no-playlist',
-      '--no-check-formats',
-      '--no-check-certificates'
-    ];
-
-    const { execFile } = require('child_process');
-    execFile(ytDlpPath, args, (error, stdout) => {
-      if (error) {
-        console.error('[Streaming Proxy] Failed to get URL:', error);
-        if (!res.headersSent) { res.writeHead(500); res.end('Internal Server Error'); }
-        return;
-      }
-
-      const directUrl = stdout.trim();
-      if (!directUrl || !directUrl.startsWith('http')) {
-        if (!res.headersSent) { res.writeHead(500); res.end('Invalid URL from extractor'); }
-        return;
-      }
-
-      streamCache.set(videoId, { url: directUrl, timestamp: Date.now() });
+    try {
+      const directUrl = await this.resolveStreamingUrl(videoId);
       this.pipeStream(directUrl, req, res);
-    });
+    } catch (err) {
+      console.error('[Streaming Proxy] Failed to resolve stream URL:', err);
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end('Internal Server Error');
+      }
+    }
   }
 
   setWebContents(contents) {
     this.webContents = contents;
   }
 
-  // ── getStreamUrl (unchanged — returns local proxy URL) ──────────────────────
+  // ── getStreamUrl (returns local proxy URL and warms cache) ──────────────────
 
   async getStreamUrl(videoId) {
+    // Proactively resolve the stream URL in the background to warm the cache
+    this.resolveStreamingUrl(videoId).catch(err => {
+      console.warn(`[Streaming Proxy] Background cache warm failed for ${videoId}:`, err);
+    });
+
     return { success: true, url: `http://127.0.0.1:${this.proxyPort}/stream?videoId=${videoId}` };
   }
 
